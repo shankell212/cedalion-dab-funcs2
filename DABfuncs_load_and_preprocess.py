@@ -25,7 +25,7 @@ import DABfuncs_plot_DQR as pfDAB_dqr
 
 
 
-def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, snr_thresh = 2, sd_threshs = [0, 45], amp_threshs = [0.002, 0.9], stim_lst_str = None, flag_do_splineSG = False):
+def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, snr_thresh = 2, sd_threshs = [0, 45], amp_threshs = [0.002, 0.9], stim_lst_str = None, flag_do_splineSG = False, fmin = 0.02 * units.Hz, fmax = 3 * units.Hz ):
 
     # make sure derivatives folders exist
     der_dir = os.path.join(rootDir_data, 'derivatives')
@@ -88,17 +88,14 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # Spline SG
             if flag_do_splineSG:
-                recTmp, slope = motionCorrect_SplineSG( recTmp )
+                recTmp, slope = motionCorrect_SplineSG( recTmp, fmin, fmax )
             else:
                 slope = None
 
             # TDDR
-            recTmp['od_tddr'] = motion_correct.TDDR( recTmp['od'])
-
-            # LPF od_TDDR to match what was done for ICA
-            fmin = 0.0 * units.Hz
-            fmax = 1 * units.Hz
+            recTmp['od_tddr'] = motion_correct.TDDR( recTmp['od'] )
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
+
 
             # GVTD for TDDR
             amp_tddr = recTmp['od_tddr'].copy()
@@ -317,11 +314,8 @@ def ODandGVTD( rec = None ):
 
 
 
-def motionCorrect_SplineSG( rec = None ):
-
-    fmin = 0.02 * units.Hz
-    fmax = 3 * units.Hz
-
+def motionCorrect_SplineSG( rec = None, fmin = 0.02 * units.Hz, fmax = 3 * units.Hz ):
+    
     if 0: # do just the Spline correct
         M = quality.detect_outliers(rec['od'], 1 * units.s)
 
