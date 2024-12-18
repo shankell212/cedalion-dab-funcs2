@@ -19,7 +19,7 @@ import json
 
 # import my own functions from a different directory
 import sys
-sys.path.append('/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data')
+sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 import DABfuncs_plot_DQR as pfDAB_dqr
 
 
