@@ -445,6 +445,119 @@ def plot_crosstalk(SD, dataCrosstalk, ax1, lst1, strTitle ):
     ax1.tick_params(axis='both', which='major', labelsize=16)
 
 
+
+def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
+
+    n_subjects = len(rec)
+    n_files_per_subject = len(rec[0])
+
+    # loop over the subjects
+    for subj_idx in range( 1 ): #n_subjects ):
+        for file_idx in range( n_files_per_subject ):
+
+            nan_chs = rec[subj_idx][file_idx]['od'].values
+            nan_chs = np.mean(nan_chs, axis=2) # mean over time
+            nan_chs = np.mean(nan_chs, axis=1) # mean over wavelengths
+            nan_chs = np.isnan(nan_chs) # identify channels that are NaN
+            idx_good = np.where( nan_chs == False )[0]
+            idx_pruned = np.where( nan_chs == True )[0]
+
+            # Analyze the 'od' data for motion artifacts
+            M = quality.detect_outliers(rec[subj_idx][file_idx]["od"], 1 * units.s)
+            # get percent of unpruned channels that have no motion at each time point
+            tInc_all = M.sum( axis=1 ).sum( axis=0 ) # sum over wavelengths
+            #tInc_all = (tInc_all//2 - (len(nan_chs) - len(idx_good))) / len(nan_chs)
+            tInc_all = (tInc_all//2) / len(nan_chs)
+
+            # get number of motion events per channel
+            foo = M.values
+            foo = foo.astype(int) # False=0, True=1
+            foo = np.diff(foo, axis=2) # diff along time to identify start of motion epochs
+            foo = np.where(foo==-1, 1, 0) # 1 where motion starts, 0 otherwise
+            foo = np.sum(foo, axis=2) # sum motion starts along time
+            foo = np.mean(foo, axis=1) # mean across wavelengths
+
+            tIncCh_n_per_ch = xr.DataArray(foo, dims=['channel'], coords={'channel':M.channel})
+            tIncCh_n_per_ch['source'] = M.source # add source coordinate from M
+            tIncCh_n_per_ch[idx_pruned] = np.nan # set pruned channels to nan
+
+            # analyze the 'od_tddr' data for motion artifacts
+            M = quality.detect_outliers(rec[subj_idx][file_idx]['od_tddr'], 1 * units.s)
+            # get percent of unpruned channels that have no motion at each time point
+            tInc_all_tddr = M.sum( axis=1 ) # sum over wavelengths
+            tInc_all_tddr = tInc_all_tddr.sum( axis=0 ) # sum over channels
+            #tInc_tddr_all = (tIncCh_tddr_all//2 - (len(nan_chs) - len(idx_good))) / len(nan_chs)
+            tInc_all_tddr = (tInc_all_tddr//2) / len(nan_chs)
+            rec[subj_idx][file_idx].aux_ts['tInc_all_tddr'] = tInc_all_tddr
+
+            # get number of motion events per channel
+            foo = M.values
+            foo = foo.astype(int) # False=0, True=1
+            foo = np.diff(foo, axis=2) # diff along time to identify start of motion epochs
+            foo = np.where(foo==-1, 1, 0) # 1 where motion starts, 0 otherwise
+            foo = np.sum(foo, axis=2) # sum motion starts along time
+            foo = np.mean(foo, axis=1) # mean across wavelengths
+
+            tIncCh_n_per_ch_tddr = xr.DataArray(foo, dims=['channel'], coords={'channel':M.channel})
+            tIncCh_n_per_ch_tddr['source'] = M.source # add source coordinate from M
+            tIncCh_n_per_ch_tddr[idx_pruned] = np.nan # set pruned channels to nan
+
+            f, ax = p.subplots(2, 2, figsize=(10, 10))
+            plots.scalp_plot(
+                    rec[0][0]['od'],
+                    rec[0][0].geo3d,
+                    tIncCh_n_per_ch_tddr,
+                    ax[0][0],
+                    cmap='jet',
+                    optode_labels=False,
+                    optode_size=5,
+                    vmin = 0,
+                    vmax = np.min((np.nanmax(tIncCh_n_per_ch_tddr), 100)),
+                    title='# Motion Artifacts after TDDR'
+                )
+
+            plots.scalp_plot(
+                    rec[0][0]['od'],
+                    rec[0][0].geo3d,
+                    100*(1 - tIncCh_n_per_ch_tddr / tIncCh_n_per_ch),
+                    ax[0][1],
+                    cmap='jet',
+                    optode_labels=False,
+                    optode_size=5,
+                    vmin = 0,
+                    vmax = 100,
+                    title='Percent reduction '
+                )
+
+            # plot the tInc_all with time and stim markers
+            ax1 = ax[1][0]
+            ax1.plot( rec[subj_idx][file_idx]['od'].time, tInc_all_tddr, label='tInc_tddr' )
+            plots.plot_stim_markers(ax1, rec[subj_idx][file_idx].stim, y=1)
+            ax1.set_title( f"Subject:{subj_idx+1}, Pruned: {(len(nan_chs)-len(idx_good))*100/len(nan_chs):.1f}%" )
+            #    p.xlabel( 'Time' )
+            #    p.ylabel( 'tInc_all' )
+            ax1.set_xlabel("time (s)")
+            ax1.grid()
+            ax1.legend()
+
+            # Plot GVTD
+            ax1 = ax[1][1]
+            ax1.plot( rec[subj_idx][file_idx].aux_ts["gvtd"].time, rec[subj_idx][file_idx].aux_ts["gvtd_tddr"], color='#ff4500', label="GVTD TDDR")
+            ax1.set_xlabel("time (s)")
+            thresh_tddr = quality.find_gvtd_thresh(rec[subj_idx][file_idx].aux_ts['gvtd_tddr'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
+            ax1.axhline(thresh_tddr, color='#ff4500', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
+            plots.plot_stim_markers(ax1, rec[subj_idx][file_idx].stim, y=1)
+            ax1.legend()
+
+            # give a title to the figure and save it
+            filenm = filenm_lst[subj_idx][file_idx]
+            p.suptitle(filenm)
+            p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + '_DQR_tIncCh.png') )
+            p.close()
+
+            return rec
+
+
 def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, filepath, flag_plot = True):   
 
     chs_pruned_percent = np.zeros( (n_subjects, n_files_per_subject) )
