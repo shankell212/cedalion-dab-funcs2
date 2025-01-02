@@ -446,13 +446,13 @@ def plot_crosstalk(SD, dataCrosstalk, ax1, lst1, strTitle ):
 
 
 
-def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
+def plot_tIncCh_dqr( rec, filepath, filenm_lst, iqr_threshold_std=2, iqr_threshold_grad=1.5, flag_plot=False ):
 
     n_subjects = len(rec)
     n_files_per_subject = len(rec[0])
 
     # loop over the subjects
-    for subj_idx in range( 1 ): #n_subjects ):
+    for subj_idx in range( n_subjects ):
         for file_idx in range( n_files_per_subject ):
 
             nan_chs = rec[subj_idx][file_idx]['od'].values
@@ -462,12 +462,14 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
             idx_good = np.where( nan_chs == False )[0]
             idx_pruned = np.where( nan_chs == True )[0]
 
+            #
             # Analyze the 'od' data for motion artifacts
-            M = quality.detect_outliers(rec[subj_idx][file_idx]["od"], 1 * units.s)
+            #
+            M = quality.detect_outliers(rec[subj_idx][file_idx]["od"], 1 * units.s, iqr_threshold_std, iqr_threshold_grad)
             # get percent of unpruned channels that have no motion at each time point
             tInc_all = M.sum( axis=1 ).sum( axis=0 ) # sum over wavelengths
             #tInc_all = (tInc_all//2 - (len(nan_chs) - len(idx_good))) / len(nan_chs)
-            tInc_all = (tInc_all//2) / len(nan_chs)
+            tInc_all = (1-(tInc_all//2) / len(nan_chs)) * 100
 
             # get number of motion events per channel
             foo = M.values
@@ -481,13 +483,19 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
             tIncCh_n_per_ch['source'] = M.source # add source coordinate from M
             tIncCh_n_per_ch[idx_pruned] = np.nan # set pruned channels to nan
 
+            #
             # analyze the 'od_tddr' data for motion artifacts
-            M = quality.detect_outliers(rec[subj_idx][file_idx]['od_tddr'], 1 * units.s)
+            #
+            foo = rec[subj_idx][file_idx]['od_tddr'].copy()
+            # foo = cedalion.sigproc.frequency.freq_filter(foo, 0 * units.Hz, 1 * units.Hz)
+            # foo = foo[:,:,::3]
+            # foo = foo.interp(time=rec[subj_idx][file_idx]['od_tddr'].time) # this is done to handle when we downsample before ICA
+            M = quality.detect_outliers(foo, 1 * units.s, iqr_threshold_std, iqr_threshold_grad)
             # get percent of unpruned channels that have no motion at each time point
             tInc_all_tddr = M.sum( axis=1 ) # sum over wavelengths
             tInc_all_tddr = tInc_all_tddr.sum( axis=0 ) # sum over channels
             #tInc_tddr_all = (tIncCh_tddr_all//2 - (len(nan_chs) - len(idx_good))) / len(nan_chs)
-            tInc_all_tddr = (tInc_all_tddr//2) / len(nan_chs)
+            tInc_all_tddr = (1-(tInc_all_tddr//2) / len(nan_chs))*100
             rec[subj_idx][file_idx].aux_ts['tInc_all_tddr'] = tInc_all_tddr
 
             # get number of motion events per channel
@@ -502,7 +510,38 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
             tIncCh_n_per_ch_tddr['source'] = M.source # add source coordinate from M
             tIncCh_n_per_ch_tddr[idx_pruned] = np.nan # set pruned channels to nan
 
-            f, ax = p.subplots(2, 2, figsize=(10, 10))
+            #
+            # analyze the 'od_tddr_ica' data for motion artifacts
+            #
+            if 'od_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+                foo = rec[subj_idx][file_idx]['od_tddr_ica'].copy()
+                foo = foo.interp(time=rec[subj_idx][file_idx]['od_tddr'].time) # this is done to handle when we downsample before ICA
+                M = quality.detect_outliers(foo, 1 * units.s, iqr_threshold_std, iqr_threshold_grad)
+                # get percent of unpruned channels that have no motion at each time point
+                tInc_all_tddr_ica = M.sum( axis=1 ) # sum over wavelengths
+                tInc_all_tddr_ica = tInc_all_tddr_ica.sum( axis=0 ) # sum over channels
+                #tInc_tddr_all = (tIncCh_tddr_all//2 - (len(nan_chs) - len(idx_good))) / len(nan_chs)
+                tInc_all_tddr_ica = (1-(tInc_all_tddr_ica//2) / len(nan_chs))*100
+                rec[subj_idx][file_idx].aux_ts['tInc_all_tddr_ica'] = tInc_all_tddr_ica
+
+                # get number of motion events per channel
+                foo = M.values
+                foo = foo.astype(int) # False=0, True=1
+                foo = np.diff(foo, axis=2) # diff along time to identify start of motion epochs
+                foo = np.where(foo==-1, 1, 0) # 1 where motion starts, 0 otherwise
+                foo = np.sum(foo, axis=2) # sum motion starts along time
+                foo = np.mean(foo, axis=1) # mean across wavelengths
+
+                tIncCh_n_per_ch_tddr_ica = xr.DataArray(foo, dims=['channel'], coords={'channel':M.channel})
+                tIncCh_n_per_ch_tddr_ica['source'] = M.source # add source coordinate from M
+                tIncCh_n_per_ch_tddr_ica[idx_pruned] = np.nan # set pruned channels to nan
+
+
+            if 'od_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+                f, ax = p.subplots(3, 2, figsize=(9, 10))
+            else:
+                f, ax = p.subplots(2, 2, figsize=(9, 10))
+
             plots.scalp_plot(
                     rec[0][0]['od'],
                     rec[0][0].geo3d,
@@ -529,9 +568,42 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
                     title='Percent reduction '
                 )
 
+            if 'od_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+                plots.scalp_plot(
+                        rec[0][0]['od'],
+                        rec[0][0].geo3d,
+                        tIncCh_n_per_ch_tddr_ica,
+                        ax[1][0],
+                        cmap='jet',
+                        optode_labels=False,
+                        optode_size=5,
+                        vmin = 0,
+                        vmax = np.min((np.nanmax(tIncCh_n_per_ch_tddr_ica), 100)),
+                        title='# after TDDR ICA'
+                    )
+
+                plots.scalp_plot(
+                        rec[0][0]['od'],
+                        rec[0][0].geo3d,
+                        100*(1 - tIncCh_n_per_ch_tddr_ica / tIncCh_n_per_ch_tddr),
+                        ax[1][1],
+                        cmap='jet',
+                        optode_labels=False,
+                        optode_size=5,
+                        vmin = 0,
+                        vmax = 100,
+                        title='Percent reduction '
+                    )
+                ax1 = ax[2][0]
+                ax2 = ax[2][1]
+            else:
+                ax1 = ax[1][0]
+                ax2 = ax[1][1]
+
             # plot the tInc_all with time and stim markers
-            ax1 = ax[1][0]
-            ax1.plot( rec[subj_idx][file_idx]['od'].time, tInc_all_tddr, label='tInc_tddr' )
+            ax1.plot( rec[subj_idx][file_idx]['od'].time, tInc_all_tddr, label='tInc_tddr', color='b' )
+            if 'od_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+                ax1.plot( rec[subj_idx][file_idx]['od'].time, tInc_all_tddr_ica, label='tInc_tddr_ica', color='m' )
             plots.plot_stim_markers(ax1, rec[subj_idx][file_idx].stim, y=1)
             ax1.set_title( f"Subject:{subj_idx+1}, Pruned: {(len(nan_chs)-len(idx_good))*100/len(nan_chs):.1f}%" )
             #    p.xlabel( 'Time' )
@@ -541,21 +613,32 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst ):
             ax1.legend()
 
             # Plot GVTD
-            ax1 = ax[1][1]
-            ax1.plot( rec[subj_idx][file_idx].aux_ts["gvtd"].time, rec[subj_idx][file_idx].aux_ts["gvtd_tddr"], color='#ff4500', label="GVTD TDDR")
-            ax1.set_xlabel("time (s)")
+            ax2.plot( rec[subj_idx][file_idx].aux_ts["gvtd"].time, rec[subj_idx][file_idx].aux_ts["gvtd_tddr"], label="GVTD TDDR", color='b') # color='#ff4500', 
             thresh_tddr = quality.find_gvtd_thresh(rec[subj_idx][file_idx].aux_ts['gvtd_tddr'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
-            ax1.axhline(thresh_tddr, color='#ff4500', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
-            plots.plot_stim_markers(ax1, rec[subj_idx][file_idx].stim, y=1)
-            ax1.legend()
+            ax2.axhline(thresh_tddr, color='b', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
+            if 'od_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+                amp_tddr = rec[subj_idx][file_idx]['od_tddr_ica'].copy()
+                amp_tddr.values = np.exp(-amp_tddr.values)
+                gvtd_tddr_ica = quality.gvtd(amp_tddr)
+                ax2.plot( rec[subj_idx][file_idx]['od_tddr_ica'].time, gvtd_tddr_ica, label="GVTD TDDR ICA", color='m' )
+                thresh_tddr = quality.find_gvtd_thresh(gvtd_tddr_ica.values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
+                ax2.axhline(thresh_tddr, color='m', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
+            ax2.set_xlabel("time (s)")
+            plots.plot_stim_markers(ax2, rec[subj_idx][file_idx].stim, y=1)
+            ax2.legend()
 
             # give a title to the figure and save it
             filenm = filenm_lst[subj_idx][file_idx]
             p.suptitle(filenm)
             p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + '_DQR_tIncCh.png') )
-            p.close()
+#            p.close()
 
-            return rec
+            if flag_plot:
+                p.show()
+            else:
+                p.close()
+
+    return rec
 
 
 def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, filepath, flag_plot = True):   
