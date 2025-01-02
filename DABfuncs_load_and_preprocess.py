@@ -86,6 +86,14 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, snr_thresh, sd_threshs, amp_threshs )
             recTmp = ODandGVTD( recTmp )
 
+            # Get the slope of 'od' before motion correction and any bandpass filtering
+            foo = recTmp['od'].copy()
+            foo = foo.pint.dequantify()
+            slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
+            slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
+            slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
+            slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
+
             # Spline SG
             if flag_do_splineSG:
                 recTmp, slope = motionCorrect_SplineSG( recTmp, fmin, fmax )
@@ -94,13 +102,20 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # TDDR
             recTmp['od_tddr'] = motion_correct.TDDR( recTmp['od'] )
-            recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
 
+            # Get slopes after TDDR before bandpass filtering
+            slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
+            slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
+            slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
+            slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
-            # GVTD for TDDR
+            # GVTD for TDDR before bandpass filtering
             amp_tddr = recTmp['od_tddr'].copy()
             amp_tddr.values = np.exp(-amp_tddr.values)
             recTmp.aux_ts['gvtd_tddr'] = quality.gvtd(amp_tddr)
+
+            # bandpass filter od_tddr
+            recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
 
             # SplineSG Conc
             dpf = xr.DataArray(
@@ -110,23 +125,11 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             )
             if flag_do_splineSG:
                 recTmp['conc_splineSG'] = cedalion.nirs.od2conc(recTmp['od_splineSG'], recTmp.geo3d, dpf, spectrum="prahl")
-    #            recTmp = pfDAB.Conc( recTmp )
 
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
-            # Get slopes for TDDR and before TDDR
-            slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
-            slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
-            slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
-            slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
-            foo = recTmp['od'].copy()
-            foo = foo.pint.dequantify()
-            slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-            slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-            slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
-            slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
 
             #
             # Plot DQRs
@@ -334,18 +337,19 @@ def motionCorrect_SplineSG( rec = None, fmin = 0.02 * units.Hz, fmax = 3 * units
         tIncCh_pad = tIncCh.pad(time=extend, mode="constant", constant_values=True)
 
         rec['od_splineSG'] = motion_correct.motion_correct_spline(fNIRSdata_lpf2_pad, tIncCh_pad, 0.99)
-        rec['od_splineSG'] = cedalion.sigproc.frequency.freq_filter(rec['od_splineSG'], fmin, fmax)
 
     else: # Do SplineSG
         frame_size = 10 * units.s
         rec['od_splineSG'] = motion_correct.motion_correct_splineSG(rec['od'], p=0.99, frame_size=frame_size)
-        rec['od_splineSG'] = cedalion.sigproc.frequency.freq_filter(rec['od_splineSG'], fmin, fmax)
 
     # fit a line to the time course for each channel in od_splineSG
     slope = rec['od_splineSG'].polyfit(dim='time', deg=1).sel(degree=1)
     slope = slope.rename({"polyfit_coefficients": "slope"})
     slope = slope.assign_coords(channel=rec['od_splineSG'].channel)
     slope = slope.assign_coords(wavelength=rec['od_splineSG'].wavelength)
+
+    rec['od_splineSG'] = cedalion.sigproc.frequency.freq_filter(rec['od_splineSG'], fmin, fmax)
+
 
     return rec, slope
 
