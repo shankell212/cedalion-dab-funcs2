@@ -276,7 +276,9 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             # end loop over alpha_meas
         # end loop over alpha_spatial
 
-    return X, W, C
+    C_norm = C / f
+
+    return X, W, C_norm
 
 
 
