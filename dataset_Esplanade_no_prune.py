@@ -232,7 +232,7 @@ print('Saved group average HRF to ' + file_path_pkl)
 
 
 
-# %% Block Average - covariance weighted
+# %% Block Average - variance of the mean weighted (aka MSE weighted)
 ##############################################################################
 
 cov_min_thresh = 1e-6 # minimum value for the diagonal of the covariance matrix
@@ -317,7 +317,7 @@ for subj_idx in range(n_subjects):
 
         # look at saturated channels
         idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
-        n_chs = int(cov.shape[0]//2)
+        n_chs = int(len(cov_diag)//2)
         cov_diag[idx_sat] = cov_val_on_diagonal
         cov_diag[idx_sat + n_chs] = cov_val_on_diagonal
         cov_t_diag[idx_sat,:] = cov_val_on_diagonal
@@ -488,6 +488,7 @@ f,ax = p.subplots(1,1)
 ax.semilogy( np.sqrt(cov_mean_weighted.diagonal()), label='SE' )
 ax.semilogy( np.mean(y_mean_weighted[:,idx_reltime],axis=1), label='mean(y)' )
 ax.legend()
+
 p.show()
 
 
@@ -537,10 +538,12 @@ spectrum = 'prahl'
 
 # get the group average HRF over a time window
 hrf_conc_mag = blockaverage_all.sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+hrf_conc_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
 # convert back to OD
 E = cedalion.nirs.get_extinction_coefficients(spectrum, wavelength)
 hrf_od_mag = xr.dot(E, hrf_conc_mag * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+hrf_od_ts = xr.dot(E, hrf_conc_ts * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
 
 # if 0:
 #     idx_reltime = np.where((od_epochs_mean.reltime.values >= t_win[0]) & (od_epochs_mean.reltime.values <= t_win[1]))[0]
@@ -551,10 +554,11 @@ flag = False
 if len(trial_type_img_split) > 1:
     if trial_type_img_split[1] == 'weighted':
         flag = True
+
 if not flag:    
-    X_grp, W, AAT = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+    X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
 else:
-    X_grp, W, AAT = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, cov_mean_weighted, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+    X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, cov_mean_weighted, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
 
 
 
@@ -618,6 +622,110 @@ p0 = pfDAB_img.plot_image_recon(X_tstat, head, 'hbo_brain', 'left')
 #p0.disable()
 
 
+
+# %% plot SVS of the MSE compared with that of A A.T
+##############################################################################
+
+u,s,v = np.linalg.svd(AAT_norm)
+u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
+
+f,ax = p.subplots(2,1,figsize=(8,10))
+
+ax1 = ax[0]
+ax1.semilogy(AAT_norm.diagonal(),label='A A.T')
+ax1.semilogy(cov_mean_weighted.diagonal()*alpha_meas_list[-1],label='MSE')
+ax1.legend()
+ax1.set_title(fr'Diagonal of (A A.T)/norm and MSE*$\alpha_{{meas}}$={alpha_meas_list[-1]:.2e}')
+
+ax1 = ax[1]
+ax1.semilogy(s,label='A A.T')
+ax1.semilogy(s1,label='MSE')
+ax1.legend()
+ax1.set_title(r'Singular Values of (A A.T)/norm and MSE*$\alpha_{{meas}}$')
+
+p.show()
+
+# give a title to the figure
+dirnm = os.path.basename(os.path.normpath(rootDir_data))
+p.suptitle(f'Data set - {dirnm}')
+
+p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_AAT_svs.png") )
+
+p.show()
+
+
+
+
+# %% Parcels
+##############################################################################
+# list unique parcels in X
+parcels = np.unique(X_grp['parcel'].values)
+#parcels
+
+# parcels with '_LH' at the end
+parcels_LH = [x for x in parcels if x.endswith('_LH')]
+#parcels_LH
+
+# %%
+
+Xo = X_tstat.sel(chromo='HbO')
+
+# Create a mapping from vertex to parcel
+vertex_to_parcel = Xo['parcel'].values
+
+# Add the parcel information as a coordinate to the DataArray/Dataset
+Xo = Xo.assign_coords(parcel=('vertex', vertex_to_parcel))
+
+# Group by the parcel coordinate and calculate the mean over the vertex dimension
+Xo_parcel = Xo.groupby('parcel').mean(dim='vertex')
+
+# Verify the result
+#display(Xo)
+#display(Xo_parcel)
+
+# find Xo_parcel values > 2 and from parcels_LH
+Xo_parcel_2 = Xo_parcel.where(np.abs(Xo_parcel) > 5).dropna('parcel').where(Xo_parcel['parcel'].isin(parcels_LH)).dropna('parcel')
+
+# Xo_parcel_2 = Xo_parcel.where(Xo_parcel > 3)
+# Xo_parcel_2 = Xo_parcel_2.dropna(dim='parcel')
+
+# %%
+od_ts = hrf_od_ts.stack(measurement=('channel', 'wavelength')).sortby('wavelength').T
+X_grp_ts = W @ od_ts.values
+
+split = len(X_grp_ts)//2
+X_grp_ts = X_grp_ts.reshape([2, split, X_grp_ts.shape[1]])
+X_grp_ts = X_grp_ts.transpose(1,0,2)
+
+X_grp_ts = xr.DataArray(X_grp_ts,
+                    dims = ('vertex', 'chromo', 'reltime'),
+                    coords = {'chromo': ['HbO', 'HbR'],
+                            'parcel': ('vertex',Adot.coords['parcel'].values),
+                            'is_brain':('vertex', Adot.coords['is_brain'].values),
+                            'reltime': od_ts.reltime.values},
+                    )
+X_grp_ts = X_grp_ts.set_xindex("parcel")
+
+
+# %%
+# get the time series for the parcels
+Xo_ts = X_grp_ts #.sel(chromo='HbO')
+vertex_to_parcel = Xo_ts['parcel'].values
+Xo_ts = Xo_ts.assign_coords(parcel=('vertex', vertex_to_parcel))
+Xo_ts_parcel = Xo_ts.groupby('parcel').mean(dim='vertex')
+
+# plot the significant parcels
+foo = Xo_ts_parcel.sel(parcel=Xo_parcel_2.parcel.values)
+
+f, ax = p.subplots(1, 1, figsize=(10, 5))
+for i in range(foo.sizes['parcel']):
+    line, = ax.plot(foo['reltime'], foo.sel(parcel=foo['parcel'][i], chromo='HbO'), label=foo['parcel'][i].values)
+    ax.plot(foo['reltime'], foo.sel(parcel=foo['parcel'][i], chromo='HbR'), linestyle='--', color=line.get_color())
+ax.set_title('Significant parcels')
+ax.set_xlabel('Time (s)')
+ax.set_ylabel('Concentration (M)')
+ax.legend()
+p.show()
 
 
 
