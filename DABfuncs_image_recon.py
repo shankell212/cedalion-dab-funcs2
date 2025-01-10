@@ -59,7 +59,8 @@ def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
 
 
 
-def do_image_recon( hrf_od = None, head = None, Adot = None, wavelength = [760,850], BRAIN_ONLY = False, SB = False, sb_cfg = None, alpha_spatial_list = [1e-3], alpha_meas_list = [1e-3], file_save = False, file_path = None, trial_type_img = None, W = None ):
+
+def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wavelength = [760,850], BRAIN_ONLY = False, SB = False, sb_cfg = None, alpha_spatial_list = [1e-3], alpha_meas_list = [1e-3], file_save = False, file_path = None, trial_type_img = None, W = None ):
 
     print( 'Starting Image Reconstruction')
 
@@ -169,9 +170,10 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, wavelength = [760,8
             #% GET W
             F = A_hat @ A_hat.T
             f = max(np.diag(F)) 
+            print(f'   f = {f}')
             
-            C = A @ (Linv ** 2) @ A.T
-            D = Linv @ A.T
+            C = F #A @ (Linv ** 2) @ A.T
+            D = Linv**2 @ A.T
             
         for alpha_meas in alpha_meas_list:
             
@@ -184,9 +186,12 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, wavelength = [760,8
                 W = W.assign_coords({"chromo" : ("flat_vertex", ["HbO"]*nvertices  + ["HbR"]* nvertices)})
                 W = W.set_xindex("chromo")
             elif W is None:
-                lambda_meas = alpha_meas * f 
-                W = D @ np.linalg.inv(C  + lambda_meas * np.eye(A.shape[0]) )
-
+                if C_meas is None:
+                    lambda_meas = alpha_meas * f 
+                    W = D @ np.linalg.inv(C  + lambda_meas * np.eye(A.shape[0]) )
+                else:
+                    lambda_meas = alpha_meas * f
+                    W = D @ np.linalg.inv(C + lambda_meas * C_meas)
             nvertices = W.shape[0]//2
         
             #% GENERATE IMAGES FOR DIFFERENT IMAGE PARAMETERS AND ALSO FOR THE FULL TIMESERIES
@@ -258,8 +263,12 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, wavelength = [760,8
 
             # save the results
             if file_save:
-                filepath = os.path.join(file_path, f'X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
-                print(f'   Saving to X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                if C_meas is None:
+                    filepath = os.path.join(file_path, f'X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                    print(f'   Saving to X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                else:
+                    filepath = os.path.join(file_path, f'X_{trial_type_img}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                    print(f'   Saving to X_{trial_type_img}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
                 file = gzip.GzipFile(filepath, 'wb')
                 file.write(pickle.dumps([X, alpha_meas, alpha_spatial]))
                 file.close()     
@@ -267,11 +276,11 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, wavelength = [760,8
             # end loop over alpha_meas
         # end loop over alpha_spatial
 
-    return X, W
+    return X, W, C
 
 
 
-def plot_image_recon( X, head, view_position='superior' ):
+def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
     # pos_names = ['superior', 'left']
 
     #
@@ -311,46 +320,38 @@ def plot_image_recon( X, head, view_position='superior' ):
     p0 = pv.Plotter(shape=(1,1), window_size = [600, 600])
 #        p.add_text(f"Group average with alpha_meas = {alpha_meas} and alpha_spatial = {alpha_spatial}", position='upper_left', font_size=12, viewport=True)
     
-    # hbo brain 
-    surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
-    surf = pv.wrap(surf.mesh)
-    p0.subplot(0,0)
-    p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
-    p0.camera_position = pos
-    p0.add_text('HbO Brain', position='lower_left', font_size=10)
+    if flag_hbx == 'hbo_brain': # hbo brain 
+        surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
+        surf = pv.wrap(surf.mesh)
+        p0.subplot(0,0)
+        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.camera_position = pos
+        p0.add_text('HbO Brain', position='lower_left', font_size=10)
 
-        # # hbr brain 
-        # surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
-        # surf = pv.wrap(surf.mesh)   
-        # p.subplot(0,1)      
-        # p.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
-        # p.camera_position = camera_position
-        # p.add_text('HbR Brain', position='lower_left', font_size=10)
+    elif flag_hbx == 'hbr_brain': # hbr brain
+        surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
+        surf = pv.wrap(surf.mesh)   
+        p0.subplot(0,0)      
+        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.camera_position = pos
+        p0.add_text('HbR Brain', position='lower_left', font_size=10)
 
-        # # # hbo scalp
-        # surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
-        # surf = pv.wrap(surf.mesh)
-        # p.subplot(1,0)         
-        # p.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
-        # p.camera_position = camera_position
-        # p.add_text('HbO Scalp', position='lower_left', font_size=10)
+    elif flag_hbx == 'hbo_scalp': # hbo scalp
+        surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
+        surf = pv.wrap(surf.mesh)
+        p0.subplot(0,0)         
+        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.camera_position = pos
+        p0.add_text('HbO Scalp', position='lower_left', font_size=10)
 
-        # # # hbr scalp
-        # surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
-        # surf = pv.wrap(surf.mesh)
-        # p.subplot(1,1)         
-        # p.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
-        # p.camera_position = camera_position
-        # p.add_text('HbR Scalp', position='lower_left', font_size=10)
+    elif flag_hbx == 'hbr_scalp': # hbr scalp
+        surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
+        surf = pv.wrap(surf.mesh)
+        p0.subplot(0,0)         
+        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.camera_position = pos
+        p0.add_text('HbR Scalp', position='lower_left', font_size=10)
 
-        # # link the axes
-        # p.link_views()
-
-    #     # wait until the user closes the window
-    #     print('go interactive ...')
     p0.show( )
 
     return p0
-
-
-    # print('done')    
