@@ -171,17 +171,17 @@ subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the gr
 flag_save_each_subj = False # if True, will save the block average data for each subject
 
 rec_str = 'conc_tddr'
-y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
 blockaverage_mean = y_mean
 
 rec_str = 'conc_tddr_ica'
-y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
 # rename all trial_types in the y_mean_weighted to have '-o-ica' at the end
 blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
 blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 # rec_str = 'conc_o_tddr'
-# y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+# y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
 # # rename all trial_types in the y_mean_weighted to have '-o' at the end
 # blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
 # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
@@ -208,39 +208,6 @@ print('Saved group average HRF to ' + file_path_pkl)
 
 
 
-# %% Plot the Histogram of the cov.diagonal() values
-##############################################################################
-
-f,ax = p.subplots(2,1,figsize=(6,10))
-
-# plot the diagonals for all subjects
-ax1 = ax[0]
-foo = y_mse_subj.mean('reltime')
-foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
-for i in range(n_subjects):
-    ax1.semilogy(foo[i,0,:], linewidth=0.5,alpha=0.5)
-ax1.set_title('variance in the mean for all subjects')
-ax1.set_xlabel('channel')
-ax1.legend()
-
-# histogram the diagonals
-ax1 = ax[1]
-foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)])
-foo1 = np.where(foo1 < 1e-2, 1e-2, foo1) # set the minimum value to 1e-2
-ax1.hist(np.log10(foo1), bins=100)
-# FIXME: I can plot this again once I am passing it into the block average function
-#ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={cov_min_thresh}')
-ax1.legend()
-ax1.set_title('histogram for all subjects of variance in the mean')
-ax1.set_xlabel('log10(cov_diag)')
-
-# give a title to the figure
-dirnm = os.path.basename(os.path.normpath(rootDir_data))
-p.suptitle(f'Data set - {dirnm}')
-
-p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_cov_histogram.png") )
-
-p.show()
 
 
 

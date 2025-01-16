@@ -13,8 +13,11 @@ from cedalion import units
 import numpy as np
 import xarray as xr
 
+import matplotlib.pyplot as p
 
-def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs ):
+
+
+def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data ):
 
     n_subjects = len(rec)
     n_files_per_subject = len(rec[0])
@@ -156,6 +159,38 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
     # get the weighted average
     blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
     blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
+
+
+    # plot the MSE histogram
+    f,ax = p.subplots(2,1,figsize=(6,10))
+
+    # plot the diagonals for all subjects
+    ax1 = ax[0]
+    foo = blockaverage_mse_subj.mean('reltime')
+    foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+    for i in range(n_subjects):
+        ax1.semilogy(foo[i,0,:], linewidth=0.5,alpha=0.5)
+    ax1.set_title('variance in the mean for all subjects')
+    ax1.set_xlabel('channel')
+    ax1.legend()
+
+    # histogram the diagonals
+    ax1 = ax[1]
+    foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)])
+    foo1 = np.where(foo1 < 1e-2, 1e-2, foo1) # set the minimum value to 1e-2
+    ax1.hist(np.log10(foo1), bins=100)
+    ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
+    ax1.legend()
+    ax1.set_title('histogram for all subjects of variance in the mean')
+    ax1.set_xlabel('log10(cov_diag)')
+
+    # give a title to the figure and save it
+    dirnm = os.path.basename(os.path.normpath(rootDir_data))
+    p.suptitle(f'Data set - {dirnm}')
+
+    p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', f'DQR_group_mse_histogram_{rec_str}.png') )
+    p.close()
+
 
     return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_mse_subj
 
