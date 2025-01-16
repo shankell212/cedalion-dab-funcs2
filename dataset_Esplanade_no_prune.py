@@ -39,7 +39,8 @@ warnings.filterwarnings('ignore')
 # %% 
 ##############################################################################
 import importlib
-importlib.reload(pfDAB_img)
+importlib.reload(pfDAB_grp_avg)
+importlib.reload(pfDAB_ERBM)
 
 
 # %% Initial root directory and analysis parameters
@@ -110,9 +111,115 @@ rec, filenm_lst, chs_pruned_subjs = pfDAB.load_and_preprocess( rootDir_data, sub
 
 
 
-
-# %% Block Average - unweighted
+# %% ERBM ICA Filtering 
 ##############################################################################
+
+# used for helping determine which ICA components to keep and remove
+trange_hrf = [5, 35] * units.s # time range for block averaging
+trange_hrf_stat = [5, 20] # time range for t-stat
+stim_lst_hrf_ica = ['ST'] # which trial_types to consider for which ICA components to keep
+
+ica_spatial_mask_thresh = 1.0 # for selecting "etCO2" components to remove
+ica_tstat_thresh = 1.0 # for selecting significant components to keep
+
+
+
+
+
+pca_var_thresh = 0.99 # keep enough PCs to explain this fraction of the variance
+p_ica = 27 # not sure what this does
+
+ica_lpf = 1.0 * units.Hz # low pass filter the data before ICA
+ica_downsample = 3  # downsample the data by this factor before running ICA. ICA cost is linear with number of samples.
+                    # and since we low pass filtered the data before ICA, we can downsample it to save time.
+                    # Note that the NN22 sample rate is often ~9 Hz, and will be reduced by this factor.
+
+cov_amp_thresh = 1.1e-6 # threshold for the amplitude of the channels below which we assign a high variance
+                        # for ninjaNIRS, negative amp's are set to 1e-6. Sometimes spikes bring the mean slightly above 1e-6
+
+
+flag_ICA_use_pruned_data = True # if True, use the pruned data for ICA, otherwise use the original data
+                                 # if False, then we need to correct the variances of the pruned channels for the ts_zscore
+flag_calculate_ICA_matrix = False
+flag_ERBM_vs_EBM = False # if True, use ERBM, otherwise use EBM
+flag_do_ica_filter = True
+# FIXME: I want to verify that this properly scales back the NOT pruned data to channel space
+rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica )
+
+
+
+# for subj_idx in range( 2 ):#n_subjects ):
+#     for file_idx in range(n_files_per_subject):
+
+#         filenm = filenm_lst[subj_idx][file_idx]
+#         print(f'Processing {filenm}')
+
+#         # the TS data to get the ICA of. 
+#         if flag_ICA_use_pruned_data:
+#             foo = rec[subj_idx][file_idx]["od_tddr"].copy()
+#         else:
+#             foo = rec[subj_idx][file_idx]["od_o_tddr"].copy()
+
+#         # filter foo with ica_lpf and then downsample and stack it
+#         foo = cedalion.sigproc.frequency.freq_filter(foo, 0 * units.Hz, ica_lpf )
+#         foo = foo[:,:,::ica_downsample]
+#         TS = foo.stack(measurement = ['channel', 'wavelength']).sortby('wavelength')
+
+#         # if not pruning channels, then need to set those channels to have high variance
+#         if not flag_ICA_use_pruned_data:
+#             amp = rec[subj_idx][file_idx]['amp'].mean('time') 
+#             amp = amp.stack(measurement=['channel', 'wavelength']).sortby('wavelength').transpose()
+#             idx_amp = np.where(amp < cov_amp_thresh)[0] # list of channels with too low signal
+#             idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0] # list of saturated channels
+#             n_chs = int(len(amp)//2)
+
+#             TS[:,idx_amp] = 0
+#             TS[:,idx_sat] = 0
+#             TS[:,idx_sat+n_chs] = 0
+
+#         # PCA step
+#         S_pca_thresh, W_pca, num_components = pfDAB_ERBM.ERBM_pca_step( TS, pca_var_thresh, flag_ICA_use_pruned_data )
+#         print(f'   number of PCA components kept: {num_components}')
+
+#         # load W_ica from file
+#         file_path = os.path.join(rootDir_data, 'derivatives', 'ica', filenm)
+#         # W_ica = np.load(file_path + '_Wica_od_tddr.npz')['W_ica']
+#         W_ica = np.load(file_path + f'_Wica_od_tddr_ds{ica_downsample}.npz')['W_ica']
+
+#         file_path = os.path.join(rootDir_data, 'derivatives', 'ica', filenm )
+#         if flag_ICA_use_pruned_data:
+#             W_ica = np.load(file_path + f'_Wica_od_tddr_ds{ica_downsample}.npz')['W_ica']
+#         else:
+#             W_ica = np.load(file_path + f'_Wica_od_o_tddr_ds{ica_downsample}.npz')['W_ica']
+
+#         # project to ICA space
+#         S_ica = W_ica @ S_pca_thresh.T
+
+#         # do the ICA filter
+#         stim = rec[subj_idx][file_idx].stim.copy()
+#         rec[subj_idx][file_idx]['od_tddr_ica'], num_components_sig_ica, num_components_remove, num_components_sig_minus_remove = pfDAB_ERBM.ERBM_ica_step(
+#             TS, stim, W_pca, W_ica, S_ica, trange_hrf, trange_hrf_stat, ica_spatial_mask_thresh, ica_tstat_thresh, stim_lst_hrf_ica
+#         )
+#         print(f'   number of significant ICA components: {num_components_sig_ica}')
+#         print(f'   number of ICA components identified by spatial mask: {num_components_remove}')
+#         print(f'   number of significant ICA components removed: {num_components_sig_ica-num_components_sig_minus_remove}')
+#         print(f'   number of ICA components kept: {num_components_sig_minus_remove}')
+
+#         # convert to concentration
+#         dpf = xr.DataArray(
+#             [1, 1],
+#             dims="wavelength",
+#             coords={"wavelength": rec[subj_idx][file_idx]['amp'].wavelength},
+#         )
+#         rec[subj_idx][file_idx]['conc_tddr_ica'] = cedalion.nirs.od2conc(rec[subj_idx][file_idx]['od_tddr_ica'], rec[subj_idx][file_idx].geo3d, dpf, spectrum="prahl")
+
+
+
+
+# %% Block Average - unweighted and weighted
+##############################################################################
+
+# FIXME: would be nice to be able to pass OD to run_group_block_average. Should be easy to add
 
 trange_hrf = [5, 35] * units.s # time range for block averaging
 trange_hrf_stat = [10, 20] # time range for t-stat
@@ -124,89 +231,113 @@ subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the gr
 
 flag_save_each_subj = False # if True, will save the block average data for each subject
 
+rec_str = 'conc_tddr'
+y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+blockaverage_mean = y_mean
+
+rec_str = 'conc_tddr_ica'
+y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+# rename all trial_types in the y_mean_weighted to have '-o-ica' at the end
+blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
+blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+
+# rec_str = 'conc_o_tddr'
+# y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+# # rename all trial_types in the y_mean_weighted to have '-o' at the end
+# blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
+# blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+# # # rename all trial_types in the y_mean to have '-oo' at the end
+# # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-oo' for x in y_mean.trial_type.values])
+# # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+
+# rec_str = 'conc_o_tddr_ica'
+# y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs )
+# # rename all trial_types in the y_mean_weighted to have '-o-ica' at the end
+# blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
+# blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 
 
-# loop over subjects and files
-blockaverage_subj = None
-for subj_idx in range( n_subjects ):
-    for file_idx in range( n_files_per_subject ):
+# # loop over subjects and files
+# blockaverage_subj = None
+# for subj_idx in range( n_subjects ):
+#     for file_idx in range( n_files_per_subject ):
 
-        filenm = filenm_lst[subj_idx][file_idx]
-        print( f"Running {subj_idx+1} of {n_subjects} subjects : {filenm}" )
+#         filenm = filenm_lst[subj_idx][file_idx]
+#         print( f"Running {subj_idx+1} of {n_subjects} subjects : {filenm}" )
 
-        if flag_do_splineSG:
-            conc_filt = rec[subj_idx][file_idx]['conc_splineSG'].copy()
-        else:
-            conc_filt = rec[subj_idx][file_idx]['conc_tddr'].copy()
-        # LPF the data to match the ICA data
-        conc_filt = cedalion.sigproc.frequency.freq_filter(conc_filt, 0 * units.Hz, ica_lpf )
+#         if flag_do_splineSG:
+#             conc_filt = rec[subj_idx][file_idx]['conc_splineSG'].copy()
+#         else:
+#             conc_filt = rec[subj_idx][file_idx]['conc_tddr'].copy()
+#         # LPF the data to match the ICA data
+#         conc_filt = cedalion.sigproc.frequency.freq_filter(conc_filt, 0 * units.Hz, ica_lpf )
 
-        # check if rec[subj_idx][file_idx]['conc_tddr_ica'] exists
-        if 'conc_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
-            conc_filt_ica = rec[subj_idx][file_idx]['conc_tddr_ica'].copy()
-        else:
-            conc_filt_ica = None
+#         # check if rec[subj_idx][file_idx]['conc_tddr_ica'] exists
+#         if 'conc_tddr_ica' in rec[subj_idx][file_idx].timeseries.keys():
+#             conc_filt_ica = rec[subj_idx][file_idx]['conc_tddr_ica'].copy()
+#         else:
+#             conc_filt_ica = None
 
-        #
-        # block average
-        #
+#         #
+#         # block average
+#         #
 
-        # select the stim for the given file
-        stim = rec[subj_idx][file_idx].stim.copy()
+#         # select the stim for the given file
+#         stim = rec[subj_idx][file_idx].stim.copy()
 
-        # get the epochs
-        # conc_epochs_tmp = pfDAB_grp_avg.block_average( conc_filt, stim, rec[subj_idx][file_idx].geo3d, trange_hrf, glm_basis_func_param, glm_drift_order, flag_do_GLM, ssr_rho_thresh, stim_lst_hrf )
-        conc_epochs_tmp = pfDAB_grp_avg.block_average( conc_filt, stim, rec[subj_idx][file_idx].geo3d, trange_hrf, [], [], False, [], stim_lst_hrf )
-        # concatenate the different epochs from each file for each subject
-        if file_idx == 0:
-            conc_epochs_all = conc_epochs_tmp
-        else:
-            conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
+#         # get the epochs
+#         # conc_epochs_tmp = pfDAB_grp_avg.block_average( conc_filt, stim, rec[subj_idx][file_idx].geo3d, trange_hrf, glm_basis_func_param, glm_drift_order, flag_do_GLM, ssr_rho_thresh, stim_lst_hrf )
+#         conc_epochs_tmp = pfDAB_grp_avg.block_average( conc_filt, stim, rec[subj_idx][file_idx].geo3d, trange_hrf, [], [], False, [], stim_lst_hrf )
+#         # concatenate the different epochs from each file for each subject
+#         if file_idx == 0:
+#             conc_epochs_all = conc_epochs_tmp
+#         else:
+#             conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
 
-        # get the epochs for ICA filtered data
-        if conc_filt_ica is not None:
-            stim_ica = rec[subj_idx][file_idx].stim.copy()
-            stim_ica['trial_type'] = stim_ica['trial_type'] + '-ica'
-            stim_lst_hrf_ica = [x + '-ica' for x in stim_lst_hrf]
+#         # get the epochs for ICA filtered data
+#         if conc_filt_ica is not None:
+#             stim_ica = rec[subj_idx][file_idx].stim.copy()
+#             stim_ica['trial_type'] = stim_ica['trial_type'] + '-ica'
+#             stim_lst_hrf_ica = [x + '-ica' for x in stim_lst_hrf]
 
-            # get the epochs for ICA filtered data
-            # conc_epochs_ica_tmp = pfDAB_grp_avg.block_average( conc_filt_ica, stim_ica, rec[subj_idx][file_idx].geo3d, trange_hrf, glm_basis_func_param, glm_drift_order, flag_do_GLM, ssr_rho_thresh, stim_lst_hrf_ica )
-            conc_epochs_ica_tmp = pfDAB_grp_avg.block_average( conc_filt_ica, stim_ica, rec[subj_idx][file_idx].geo3d, trange_hrf, [], [], False, [], stim_lst_hrf_ica )
-            # interpolate the ICA epochs to the same time points as the non-ICA epochs
-            conc_epochs_ica_tmp = conc_epochs_ica_tmp.interp(reltime=conc_epochs_all.reltime) * units.micromolar
-            # concatenate the different epochs from each file for each subject
-            conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_ica_tmp], dim='epoch')
+#             # get the epochs for ICA filtered data
+#             # conc_epochs_ica_tmp = pfDAB_grp_avg.block_average( conc_filt_ica, stim_ica, rec[subj_idx][file_idx].geo3d, trange_hrf, glm_basis_func_param, glm_drift_order, flag_do_GLM, ssr_rho_thresh, stim_lst_hrf_ica )
+#             conc_epochs_ica_tmp = pfDAB_grp_avg.block_average( conc_filt_ica, stim_ica, rec[subj_idx][file_idx].geo3d, trange_hrf, [], [], False, [], stim_lst_hrf_ica )
+#             # interpolate the ICA epochs to the same time points as the non-ICA epochs
+#             conc_epochs_ica_tmp = conc_epochs_ica_tmp.interp(reltime=conc_epochs_all.reltime) * units.micromolar
+#             # concatenate the different epochs from each file for each subject
+#             conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_ica_tmp], dim='epoch')
 
-        if flag_save_each_subj:
-            conc_epochs_tmp = conc_epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_tmp.trial_type.values]))
-            conc_epochs_ica_tmp = conc_epochs_ica_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_ica_tmp.trial_type.values]))
+#         if flag_save_each_subj:
+#             conc_epochs_tmp = conc_epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_tmp.trial_type.values]))
+#             conc_epochs_ica_tmp = conc_epochs_ica_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_ica_tmp.trial_type.values]))
 
-            conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
-            conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_ica_tmp], dim='epoch')
+#             conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
+#             conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_ica_tmp], dim='epoch')
 
-        # DONE LOOP OVER FILES
+#         # DONE LOOP OVER FILES
 
-    # Block Average
-    baseline_conc = conc_epochs_all.sel(reltime=(conc_epochs_all.reltime < 0)).mean('reltime')
-    conc_epochs = conc_epochs_all - baseline_conc
-    blockaverage = conc_epochs.groupby('trial_type').mean('epoch')
+#     # Block Average
+#     baseline_conc = conc_epochs_all.sel(reltime=(conc_epochs_all.reltime < 0)).mean('reltime')
+#     conc_epochs = conc_epochs_all - baseline_conc
+#     blockaverage = conc_epochs.groupby('trial_type').mean('epoch')
 
-    # gather the blockaverage across subjects
-    if blockaverage_subj is None and subj_ids[subj_idx] not in subj_id_exclude:
-        blockaverage_subj = blockaverage
-        # add a subject dimension and coordinate
-        blockaverage_subj = blockaverage_subj.expand_dims('subj')
-        blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids[subj_idx]])
-    elif subj_ids[subj_idx] not in subj_id_exclude:
-        blockaverage_subj_tmp = blockaverage
-        blockaverage_subj_tmp = blockaverage_subj_tmp.expand_dims('subj')
-        blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids[subj_idx]])
-        blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp], dim='subj')
-    else:
-        print(f"   Subject {subj_ids[subj_idx]} excluded from group average")
+#     # gather the blockaverage across subjects
+#     if blockaverage_subj is None and subj_ids[subj_idx] not in subj_id_exclude:
+#         blockaverage_subj = blockaverage
+#         # add a subject dimension and coordinate
+#         blockaverage_subj = blockaverage_subj.expand_dims('subj')
+#         blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids[subj_idx]])
+#     elif subj_ids[subj_idx] not in subj_id_exclude:
+#         blockaverage_subj_tmp = blockaverage
+#         blockaverage_subj_tmp = blockaverage_subj_tmp.expand_dims('subj')
+#         blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids[subj_idx]])
+#         blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp], dim='subj')
+#     else:
+#         print(f"   Subject {subj_ids[subj_idx]} excluded from group average")
 
-    # DONE LOOP OVER SUBJECTS
+#     # DONE LOOP OVER SUBJECTS
 
 
 # Save the block average data to a pickle file
@@ -214,14 +345,18 @@ for subj_idx in range( n_subjects ):
 # The file is saved in derivates/processed_data/blockaverage.pkl.gz
 # blockaverage_subj_mean = np.nanmean(blockaverage_subj, axis=4)
 # blockaverage.values = blockaverage_subj_mean
-blockaverage = blockaverage_subj.mean('subj')
+
+#blockaverage = blockaverage_subj.mean('subj')
+
+blockaverage = blockaverage_mean
+
 if flag_save_each_subj:
     # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
 file_path_pkl = os.path.join(rootDir_data, 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
 file = gzip.GzipFile(file_path_pkl, 'wb')
-file.write(pickle.dumps([blockaverage, rec[subj_idx][file_idx].geo2d, rec[subj_idx][file_idx].geo3d]))
+file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
 file.close()
 
 blockaverage_all = blockaverage.copy()
@@ -229,19 +364,53 @@ blockaverage_all_o = blockaverage_all.copy()
 
 print('Saved group average HRF to ' + file_path_pkl)
 
+# %% Plot the Histogram of the cov.diagonal() values
+##############################################################################
 
+f,ax = p.subplots(2,1,figsize=(6,10))
+
+# plot the diagonals for all subjects
+ax1 = ax[0]
+foo = y_mse_subj.mean('reltime')
+foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+for i in range(n_subjects):
+    ax1.semilogy(foo[i,0,:], linewidth=0.5,alpha=0.5)
+ax1.set_title('variance in the mean for all subjects')
+ax1.set_xlabel('channel')
+ax1.legend()
+
+# histogram the diagonals
+ax1 = ax[1]
+foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)])
+foo1 = np.where(foo1 < 1e-2, 1e-2, foo1) # set the minimum value to 1e-2
+ax1.hist(np.log10(foo1), bins=100)
+#ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={cov_min_thresh}')
+ax1.legend()
+ax1.set_title('histogram for all subjects of variance in the mean')
+ax1.set_xlabel('log10(cov_diag)')
+
+# # give a title to the figure
+# dirnm = os.path.basename(os.path.normpath(rootDir_data))
+# p.suptitle(f'Data set - {dirnm}')
+
+# p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_cov_histogram.png") )
+
+# p.show()
 
 
 # %% Block Average - variance of the mean weighted (aka MSE weighted)
 ##############################################################################
 
+cov_amp_thresh = 1.1e-6 # threshold for the amplitude of the channels below which we assign a high variance
+                        # for ninjaNIRS, negative amp's are set to 1e-6. Sometimes spikes bring the mean slightly above 1e-6
 cov_min_thresh = 1e-6 # minimum value for the diagonal of the covariance matrix
+                      # look at histogram of cov_diag across all the subjects to help determine this value
 
 y_mean = []
 y_mean_weighted = []
 cov_mean_weighted = []
 
-for subj_idx in range(n_subjects):
+for subj_idx in range(1):#n_subjects):
 
     y_subj_mean = []
     y_subj_mean_weighted = []
@@ -280,40 +449,14 @@ for subj_idx in range(n_subjects):
 
         # adjust the covariance matrix to handle bad data
         cov_val_on_diagonal = 1e0 # set this to a large value... FIXME: larger than good data
-        cov_val_off_diagonal = 0 # I choose zero for the off diagonal elements to essentially ignore these channels
-                                 # I also have to use truncated SVD to invert the covariance matrix since I have many 
-                                 # fewer epochs than channels. This will also nicely handle the all the off diagonal elements
-                                 # for which I have low confidence given # epochs << # channels.
 
-        # list of elements in cov_diag that are nan
-        # I found these to be amp=1e-6, which was set by convertBinToSnirf for negative data
-        # and TDDR makes this a NaN for some reason.
-        # I also found that there are a few channels per run with a mean amp very close to 1e-6 but the time series
-        # has some spikes. These should also be set to a large value for cov. I can determine this by amp<1.1e-6 or look
-        # for diff(y) having many zeros indicating a constant y
-        idx_nan = np.where(np.isnan(cov_diag))[0] 
-        cov_diag[idx_nan] = cov_val_on_diagonal
-        cov_t_diag[idx_nan,:] = cov_val_on_diagonal
-        # cov[idx_nan,:] = cov_val_off_diagonal # only necessary if we want the full covariance matrix
-        # cov[:,idx_nan] = cov_val_off_diagonal
-        od_epochs_mean[idx_nan,:] = 0
-
+        # list of elements in cov_diag corresponding to channels with amp < cov_amp_thresh
         amp = rec[subj_idx][file_idx]['amp'].mean('time') # I think this also gets the NaNs from idx_nan
         amp = amp.stack(measurement=['channel', 'wavelength']).sortby('wavelength').transpose()
-        idx_amp = np.where(amp < 1.1e-6)[0]
+        idx_amp = np.where(amp < cov_amp_thresh)[0]
         cov_diag[idx_amp] = cov_val_on_diagonal
         cov_t_diag[idx_amp,:] = cov_val_on_diagonal
-        # cov[idx_amp,:] = cov_val_off_diagonal # only necessary if we want the full covariance matrix
-        # cov[:,idx_amp] = cov_val_off_diagonal
         od_epochs_mean[idx_amp,:] = 0
-
-        # FIXME: can remove this once amp_thresh set to 0.84 at top
-        # idx_amp = np.where(amp > 0.84)[0] # reduced from 0.89 to 0.84 because saturation goes lower
-        # cov_diag[idx_amp] = cov_val_on_diagonal
-        # cov_t_diag[idx_amp,:] = cov_val_on_diagonal
-        # cov[idx_amp,:] = cov_val_off_diagonal
-        # cov[:,idx_amp] = cov_val_off_diagonal
-        # od_epochs_mean[idx_amp,:] = 0
 
         # look at saturated channels
         idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
@@ -322,15 +465,11 @@ for subj_idx in range(n_subjects):
         cov_diag[idx_sat + n_chs] = cov_val_on_diagonal
         cov_t_diag[idx_sat,:] = cov_val_on_diagonal
         cov_t_diag[idx_sat + n_chs,:] = cov_val_on_diagonal
-        # cov[idx_sat,:] = cov_val_off_diagonal # only necessary if we want the full covariance matrix
-        # cov[:,idx_sat] = cov_val_off_diagonal
-        # cov[idx_sat + n_chs,:] = cov_val_off_diagonal
-        # cov[:,idx_sat + n_chs] = cov_val_off_diagonal
         od_epochs_mean[idx_sat,:] = 0
 
         # set the minimum value of the diagonal of the covariance matrix
         cov_diag_o = cov_diag.copy()
-        cov_diag[cov_diag < cov_min_thresh] = cov_min_thresh # FIXME: plot the histogram of cov_diag to determine a good thresh
+        cov_diag[cov_diag < cov_min_thresh] = cov_min_thresh 
         cov_t_diag[cov_t_diag < cov_min_thresh] = cov_min_thresh
 
         # for now we only use the diagonal elements of the covariance matrix
