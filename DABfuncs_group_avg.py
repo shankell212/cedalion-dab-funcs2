@@ -188,10 +188,11 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
 
     mse_mean_within_subject = 1 / blockaverage_mse_inv_mean_weighted
     
-    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj
+    blockaverage_mse_subj_tmp = blockaverage_mse_subj.copy()
+    blockaverage_mse_subj_tmp = xr.where(blockaverage_mse_subj_tmp < mse_min_thresh, mse_min_thresh, blockaverage_mse_subj_tmp)
+    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj_tmp
     mse_weighted_between_subjects = mse_weighted_between_subjects_tmp.mean('subj')
     mse_weighted_between_subjects = mse_weighted_between_subjects * mse_mean_within_subject
-    # FIXME: blockaverage_mse_subj is not corrected for min variance while mse_mean_within_subject is. SHould I fix that?
  
     # blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
     blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )
@@ -366,7 +367,7 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
 
 
 
-    return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_mse_subj
+    return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_subj, blockaverage_mse_subj
 
 
 
