@@ -22,6 +22,10 @@ import sys
 sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 import DABfuncs_plot_DQR as pfDAB_dqr
 
+import sys
+sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\IWHD_esplanade\\Python implentation')
+from Walking_Filter import filterWalking
+
 
 
 
@@ -85,6 +89,10 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             recTmp = preprocess( recTmp )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, snr_thresh, sd_threshs, amp_threshs )
             recTmp = ODandGVTD( recTmp )
+            
+            # Get filtered dOD 
+            recTmp["od_filt"]= filterWalking(recTmp, recTmp["od"])
+            recTmp["od_o_filt"] = filterWalking(recTmp, recTmp["od_o"])
 
             # Get the slope of 'od' before motion correction and any bandpass filtering
             foo = recTmp['od'].copy()
@@ -93,6 +101,13 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
             slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
             slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
+            # Get slope of 'od' after filtering and before MA correction
+            foo = recTmp['od_filt'].copy()
+            foo = foo.pint.dequantify()
+            slope_base_filt = foo.polyfit(dim='time', deg=1).sel(degree=1)
+            slope_base_filt = slope_base_filt.rename({"polyfit_coefficients": "slope"})
+            slope_base_filt = slope_base_filt.assign_coords(channel = recTmp['od_filt'].channel)
+            slope_base_filt = slope_base_filt.assign_coords(wavelength = recTmp['od_filt'].wavelength)
 
             # Spline SG
             if flag_do_splineSG:
@@ -103,21 +118,35 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             # TDDR
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
+            recTmp['od_filt_tddr'] = motion_correct.tddr( recTmp['od_filt'])
+            recTmp['od_o_filt_tddr'] = motion_correct.tddr( recTmp['od_o_filt'])
 
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
             slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
             slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
             slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
+            # Get slopes after TDDR before bandpass filtering for filtered 
+            slope_tddr_filt = recTmp['od_filt_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
+            slope_tddr_filt = slope_tddr_filt.rename({"polyfit_coefficients": "slope"})
+            slope_tddr_filt = slope_tddr_filt.assign_coords(channel = recTmp['od_filt_tddr'].channel)
+            slope_tddr_filt = slope_tddr_filt.assign_coords(wavelength = recTmp['od_filt_tddr'].wavelength)
 
             # GVTD for TDDR before bandpass filtering
             amp_tddr = recTmp['od_tddr'].copy()
             amp_tddr.values = np.exp(-amp_tddr.values)
             recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
+            
+            amp_tddr_filt = recTmp['od_filt_tddr'].copy()
+            amp_tddr_filt.values = np.exp(-amp_tddr_filt.values)
+            recTmp.aux_ts['gvtd_filt_tddr'], _ = quality.gvtd(amp_tddr_filt)
+            
 
             # bandpass filter od_tddr
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
+            recTmp['od_filt_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_filt_tddr'], fmin, fmax)
+            recTmp['od_o_filt_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_filt_tddr'], fmin, fmax)
 
             # SplineSG Conc
             dpf = xr.DataArray(
@@ -131,7 +160,8 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-
+            recTmp['conc_filt_tddr'] = cedalion.nirs.od2conc(recTmp['od_filt_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+            recTmp['conc_o_filt_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_filt_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
 
             #

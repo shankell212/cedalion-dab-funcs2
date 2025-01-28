@@ -15,7 +15,7 @@ import xarray as xr
 
 import matplotlib.pyplot as p
 
-
+import pdb
 
 def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data ):
 
@@ -87,6 +87,8 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
         blockaverage_weighted = blockaverage.copy()
         n_epochs = conc_epochs.shape[0]
         n_chs = conc_epochs.shape[2]
+        
+        
         foo = conc_epochs - blockaverage_weighted[0,:,:,:] # FIXME: assuming one trial_type
         if 'chromo' in conc_filt.dims:
             foo_t = foo.stack(measurement=['channel','chromo']).sortby('chromo')

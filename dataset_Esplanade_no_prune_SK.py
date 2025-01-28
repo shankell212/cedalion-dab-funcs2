@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+My own version of 
+dataset_Esplanade_no_prune.py without ICA for now
+
+Created on Mon Jan 27 11:55:48 2025
+
+@author: shank
+"""
+
 # %% Imports
 ##############################################################################
 #%matplotlib widget
@@ -23,7 +33,7 @@ import pickle
 
 # import my own functions from a different directory
 import sys
-sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
+sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\cedalion-dab-funcs2')
 import DABfuncs_load_and_preprocess as pfDAB
 import DABfuncs_plot_DQR as pfDAB_dqr
 import DABfuncs_group_avg as pfDAB_grp_avg
@@ -47,16 +57,19 @@ importlib.reload(pfDAB)
 ##############################################################################
 
 # root directory for the BIDS dataset
-rootDir_data = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/'
+rootDir_data = "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\"
 
 # subject and file IDs to process
-subj_ids = ['01','02','03','04','05','06','07','08','09']
-file_ids = ['STS_run-01']
-#file_ids = ['IWHD_run-01']
+subj_ids = ['01','02','03','04','05','06','07','08','09', '11', '12', '13', '14']
+#subj_ids = ['10'] - 
+# !!! CHECK IF SUB 10 HAS ACCEL DATA AND WHY ITS ALL 0 IN XARRAY
+
+#file_ids = ['STS_run-01']
+file_ids = ['IWHD_run-01']
 
 # list of stim trial_types to include...
-stim_lst_dqr = ['STS']#,'DT'] # for DQR plots
-stim_lst_hrf = ['STS']#,'DT'] # for calculating HRFs
+stim_lst_dqr = ['ST','DT'] # for DQR plots
+stim_lst_hrf = ['ST','DT'] # for calculating HRFs
 
 # pruning parameters
 snr_thresh = 5 # the SNR (std/mean) of a channel. 
@@ -70,8 +83,6 @@ flag_do_splineSG = False # if True, will do splineSG motion correction
 # band pass filter parameters applied to OD after motion correction
 fmin = 0.02 * units.Hz
 fmax = 3 * units.Hz
-
-
 
 
 
@@ -111,9 +122,36 @@ n_files_per_subject = len(file_ids)
 rec, filenm_lst, chs_pruned_subjs = pfDAB.load_and_preprocess( rootDir_data, subj_ids, file_ids, snr_thresh, sd_threshs, amp_threshs, stim_lst_dqr, flag_do_splineSG, fmin, fmax )
 
 
+#%% Save processed time series data
+
+# with gzip.open( os.path.join(rootDir_data, 'derivatives', 'processed_data', 'rec_list_ts.pkl'), 'wb') as f:
+#     pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL
+#     )
+    
+with gzip.open( os.path.join(rootDir_data, 'derivatives', 'processed_data', 'filenm_list_ts.pkl'), 'wb') as f:
+    pickle.dump(filenm_lst, f, protocol=pickle.HIGHEST_PROTOCOL
+    )
+
+with gzip.open( os.path.join(rootDir_data, 'derivatives', 'processed_data', 'chs_pruned_subjs_ts.pkl'), 'wb') as f:
+    pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL
+    )
+    
+#%% Open saved data:
+    
+rootDir_saveData = 'D:\\fNIRS\\DATA\\Interactive_Walking_HD\\derivatives\\processed_data\\'
+
+with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts.pkl'), 'rb') as f:
+     rec = pickle.load(f)
+     
+with gzip.open( os.path.join(rootDir_saveData, 'filenm_list_ts.pkl'), 'rb') as f:
+     filenm_list = pickle.load(f)
+
+with gzip.open( os.path.join(rootDir_saveData, 'chs_pruned_subjs_ts.pkl'), 'rb') as f:
+     chs_pruned_subjs = pickle.load(f)
 
 
 # %% ERBM ICA Filtering 
+'''
 ##############################################################################
 import importlib
 importlib.reload(pfDAB_ERBM)
@@ -148,11 +186,9 @@ flag_ERBM_vs_EBM = False # if True, use ERBM, otherwise use EBM
 
 
 # FIXME: I want to verify that this properly scales back the NOT pruned data to channel space
-rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_do_pca_filter, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica )
+#rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_do_pca_filter, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica )
 
-
-
-
+'''
 
 
 # %% Block Average - unweighted and weighted
@@ -164,7 +200,8 @@ importlib.reload(pfDAB_grp_avg)
 
 trange_hrf = [5, 35] * units.s # time range for block averaging
 trange_hrf_stat = [10, 20] # time range for t-stat
-stim_lst_hrf = ['STS'] # for calculating HRFs
+# stim_lst_hrf = ['STS'] # for calculating HRFs
+stim_lst_hrf = ['ST'] # for calculating HRFs
 
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
@@ -173,42 +210,62 @@ subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the gr
 
 flag_save_each_subj = False # if True, will save the block average data for each subject
 
-if 0:
+# WHY IS THERE AN OPTION TO RUN BLOCK AVG ON OD?
+    # for image recon, 
+        # but dont need to run od block average bc the image recon can also just convert back 2 od if given conc
+if 1:
     rec_str = 'conc_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
     blockaverage_mean = y_mean
-
-    rec_str = 'conc_tddr_pca'
+    
+    rec_str = 'conc_filt_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-filt' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    
+    rec_str = 'conc_o_tddr'
+    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    rec_str = 'conc_tddr_ica'
+    rec_str = 'conc_o_filt_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-o-filt' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+
+    
+
+    # rec_str = 'conc_tddr_pca'
+    # y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+
+    # rec_str = 'conc_tddr_ica'
+    # y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
     # rec_str = 'conc_tddr_glm'
     # y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
     # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-if 1:
+if 0:
     rec_str = 'od_o_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = blockaverage_mean_tmp
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    rec_str = 'od_o_tddr_pca'
-    y_mean, y_mean_weighted_ica, y_stderr_weighted_pca, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-    blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-pca' for x in y_mean_weighted.trial_type.values])
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    # rec_str = 'od_o_tddr_pca'
+    # y_mean, y_mean_weighted_ica, y_stderr_weighted_pca, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    # blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-pca' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    rec_str = 'od_o_tddr_ica'
-    y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-    blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    # rec_str = 'od_o_tddr_ica'
+    # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    # blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 # save the results to a pickle file
 blockaverage = blockaverage_mean
@@ -216,9 +273,10 @@ blockaverage = blockaverage_mean
 if flag_save_each_subj:
     # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
-    blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
+    #blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
+    blockaverage = blockaverage.sel(trial_type=['ST', 'ST-01', 'ST-02', 'ST-03', 'ST-04', 'ST-06', 'ST-08', 'ST-09'])
 
-file_path_pkl = os.path.join(rootDir_data, 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
+file_path_pkl = os.path.join(rootDir_data, 'derivatives', 'processed_data', 'blockaverage_ST.pkl.gz')
 file = gzip.GzipFile(file_path_pkl, 'wb')
 
 if 'chromo' in blockaverage.dims:
@@ -253,22 +311,26 @@ print('Saved group average HRF to ' + file_path_pkl)
 # %% Plot the weighted mean signal and the SE
 ##############################################################################
 
-t_win = [10, 20]
-idx_reltime = np.where((od_epochs_mean.reltime.values >= t_win[0]) & (od_epochs_mean.reltime.values <= t_win[1]))[0]
-f,ax = p.subplots(1,1)
-ax.semilogy( np.sqrt(cov_mean_weighted.diagonal()), label='SE' )
-ax.semilogy( np.mean(y_mean_weighted[:,idx_reltime],axis=1), label='mean(y)' )
-ax.legend()
+# t_win = [10, 20]
+# idx_reltime = np.where((od_epochs_mean.reltime.values >= t_win[0]) & (od_epochs_mean.reltime.values <= t_win[1]))[0]
+# f,ax = p.subplots(1,1)
+# ax.semilogy( np.sqrt(cov_mean_weighted.diagonal()), label='SE' )
+# ax.semilogy( np.mean(y_mean_weighted[:,idx_reltime],axis=1), label='mean(y)' )
+# ax.legend()
 
-p.show()
+# p.show()
 
 
 
 # %% Load the Sensitivity Matrix and Head Model
 ##############################################################################
 
-path_to_dataset = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BallSqueezing_WHHD/'
+#path_to_dataset = 'C:\\Users\\shank\\Documents\\fNIRS\\probes\\NN22\\12NN\\fw'
+path_to_dataset = 'D:\\fNIRS\\DATA\\Interactive_Walking_HD'
 head_model = 'ICBM152'
+
+# with open(probe_dir + 'Adot_wParcels.pkl', 'rb') as f:
+#     Adot = pickle.load(f) 
 
 Adot, head = pfDAB_img.load_Adot( path_to_dataset, head_model )
 
@@ -281,7 +343,7 @@ import importlib
 importlib.reload(pfDAB_img)
 
 
-trial_type_img = 'STS-o-pca' # 'DT', 'DT-ica', 'ST', 'ST-ica'
+trial_type_img = 'ST' # 'STS-o-pca' # 'DT', 'DT-ica', 'ST', 'ST-ica'
 t_win = (10, 20)
 
 file_save = True
@@ -331,7 +393,7 @@ if not flag_Cmeas:
     X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
 else:
     trial_type_img_split = trial_type_img.split('-')
-    C_meas = y_stderr_weighted_pca.sel(trial_type=trial_type_img_split[0]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # FIXME: what is the correct error estimate?
+    C_meas = y_stderr_weighted.sel(trial_type=trial_type_img_split[0]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # FIXME: what is the correct error estimate?
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas**2
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
