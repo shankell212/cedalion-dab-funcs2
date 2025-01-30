@@ -20,7 +20,6 @@ import tkinter as tk
 from tkinter import filedialog
 
 import sys
-sys.path.append('/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data')
 import spatial_basis_funs_ced as sbf 
 
 

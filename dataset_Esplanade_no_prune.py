@@ -39,37 +39,59 @@ warnings.filterwarnings('ignore')
 # %% 
 ##############################################################################
 import importlib
-importlib.reload(pfDAB_ERBM)
+importlib.reload(pfDAB_dqr)
 importlib.reload(pfDAB)
 
 
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
-# root directory for the BIDS dataset
-rootDir_data = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/'
 
-# subject and file IDs to process
-subj_ids = ['01','02','03','04','05','06','07','08','09']
-file_ids = ['STS_run-01']
-#file_ids = ['IWHD_run-01']
+cfg_dataset = {
+    'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
+    'subj_ids' : ['01','02','03','04','05','06','07','08','09'],
+    'file_ids' : ['STS_run-01'],
+    'filenm_lst' : None,
+    'subj_id_exclude' : [] #['05','07'] # if you want to exclude a subject from the group average
+}
 
-# list of stim trial_types to include...
-stim_lst_dqr = ['STS']#,'DT'] # for DQR plots
-stim_lst_hrf = ['STS']#,'DT'] # for calculating HRFs
+cfg_dqr = {
+    'stim_lst_dqr' : ['STS']
+}
 
-# pruning parameters
-snr_thresh = 5 # the SNR (std/mean) of a channel. 
-sd_threshs = [1, 60]*units.mm # defines the lower and upper bounds for the source-detector separation that we would like to keep
-amp_threshs = [1e-5, 0.84] # define whether a channel's amplitude is within a certain range
-                           # reduced from 0.89 to 0.84 because saturation goes lower
+cfg_prune = {
+    'snr_thresh' : 5, # the SNR (std/mean) of a channel. 
+    'sd_threshs' : [1, 60]*units.mm, # defines the lower and upper bounds for the source-detector separation that we would like to keep
+    'amp_threshs' : [1e-5, 0.84], # define whether a channel's amplitude is within a certain range
+    'perc_time_clean_thresh' : 0.6,
+    'sci_threshold' : 0.6,
+    'psp_threshold' : 0.1,
+    'window_length' : 5 * units.s,
+    'flag_use_sci' : True,
+    'flag_use_psp' : False
+}
 
-# motion correction parameters
-flag_do_splineSG = False # if True, will do splineSG motion correction
+cfg_motion_correct = {
+    'flag_do_splineSG' : False, # if True, will do splineSG motion correction
+    'splineSG_p' : 0.99, 
+    'splineSG_frame_size' : 10 * units.s,
+    'flag_do_tddr' : True,
+    'flag_do_imu_glm' : False,
+    'imu_glm_params' : None
+}
 
-# band pass filter parameters applied to OD after motion correction
-fmin = 0.02 * units.Hz
-fmax = 3 * units.Hz
+cfg_bandpass = { 
+    'fmin' : 0.02 * units.Hz,
+    'fmax' : 3 * units.Hz
+}
+
+cfg_preprocess = {
+    'median_filt' : 3, # set to 1 if you don't want to do median filtering
+    'cfg_prune' : cfg_prune,
+    'cfg_motion_correct' : cfg_motion_correct,
+    'cfg_bandpass' : cfg_bandpass
+}
+
 
 
 
@@ -104,12 +126,27 @@ fmax = 3 * units.Hz
 #         'gvtd_tddr' - the global variance of the time derivative of the 'od_tddr' data.
 
 # determine the number of subjects and files. Often used in loops.
-n_subjects = len(subj_ids)
-n_files_per_subject = len(file_ids)
+n_subjects = len(cfg_dataset['subj_ids'])
+n_files_per_subject = len(cfg_dataset['file_ids'])
+
+# files to load
+for subj_id in cfg_dataset['subj_ids']:
+    subj_idx = cfg_dataset['subj_ids'].index(subj_id)
+    for file_id in cfg_dataset['file_ids']:
+        file_idx = cfg_dataset['file_ids'].index(file_id)
+        filenm = f'sub-{subj_id}_task-{file_id}_nirs'
+        if subj_idx == 0 and file_idx == 0:
+            cfg_dataset['filenm_lst'] = []
+            cfg_dataset['filenm_lst'].append( [filenm] )
+        elif file_idx == 0:
+            cfg_dataset['filenm_lst'].append( [filenm] )
+        else:
+            cfg_dataset['filenm_lst'][subj_idx].append( filenm )
+
+
 
 # main load and preprocessing function
-rec, filenm_lst, chs_pruned_subjs = pfDAB.load_and_preprocess( rootDir_data, subj_ids, file_ids, snr_thresh, sd_threshs, amp_threshs, stim_lst_dqr, flag_do_splineSG, fmin, fmax )
-
+rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
 
 
 
@@ -166,6 +203,7 @@ trange_hrf = [5, 35] * units.s # time range for block averaging
 trange_hrf_stat = [10, 20] # time range for t-stat
 stim_lst_hrf = ['STS'] # for calculating HRFs
 
+# FIXME: should not be needed here... shouldbe handled in ICA step above
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
 subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the group average
@@ -175,7 +213,7 @@ flag_save_each_subj = False # if True, will save the block average data for each
 
 if 0:
     rec_str = 'conc_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
     blockaverage_mean = y_mean
 
     rec_str = 'conc_tddr_pca'
@@ -198,7 +236,7 @@ if 1:
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
     rec_str = 'od_o_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = blockaverage_mean_tmp
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
@@ -366,7 +404,7 @@ file.write(pickle.dumps([X_tstat, alpha_meas_list[-1], alpha_spatial_list[-1]]))
 file.close()     
 
 
-# %% Get image time series
+# %% Get image for each subject and do weighted average
 ##############################################################################
 import importlib
 importlib.reload(pfDAB_img)
@@ -375,8 +413,6 @@ importlib.reload(pfDAB_img)
 file_save = False
 trial_type_img = 'STS' # 'DT', 'DT-ica', 'ST', 'ST-ica'
 t_win = (10, 20)
-
-flag_Cmeas = True # if True make sure you are using the correct y_stderr_weighted below
 
 BRAIN_ONLY = False
 SB = False
@@ -400,22 +436,90 @@ wavelength = rec[0][0]['amp'].wavelength.values
 spectrum = 'prahl'
 
 
+X_hrf_mag_subj = None
+C = None
+D = None
 
-idx_subj = 0
+for idx_subj in range(n_subjects):
 
 
-hrf_od_mag = y_subj.sel(subj=subj_ids[idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
-# hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
+    hrf_od_mag = y_subj.sel(subj=subj_ids[idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+    # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
-
-if not flag_Cmeas:    
-    X_grp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
-else:
+    # get the image
     trial_type_img_split = trial_type_img.split('-')
     C_meas = y_mse_subj.sel(subj=subj_ids[idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
-    X_subj_hrf_mag, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+    if C is None or D is None:
+        X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+    else:
+        X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img, None, C, D)
+
+    # get image noise
+    cov_img_tmp = W * np.sqrt(C_meas.values)
+    cov_img_diag = np.nansum(cov_img_tmp**2, axis=1)
+
+    nV = X_hrf_mag_tmp.vertex.size
+    cov_img_diag = np.reshape( cov_img_diag, (2,nV) ).T
+
+    X_mse = X_hrf_mag_tmp.copy()
+    X_mse.values = cov_img_diag
+
+    # weighted average
+    if X_hrf_mag_subj is None:
+        X_hrf_mag_subj = X_hrf_mag_tmp
+        X_hrf_mag_subj = X_hrf_mag_subj.expand_dims('subj')
+        X_hrf_mag_subj = X_hrf_mag_subj.assign_coords(subj=[subj_ids[idx_subj]])
+
+        X_mse_subj = X_mse.copy()
+        X_mse_subj = X_mse_subj.expand_dims('subj')
+        X_mse_subj = X_mse_subj.assign_coords(subj=[subj_ids[idx_subj]])
+
+        X_hrf_mag_weighted = X_hrf_mag_tmp / X_mse
+        X_mse_inv_weighted = 1 / X_mse
+    elif subj_ids[idx_subj] not in subj_id_exclude:
+        X_hrf_mag_subj_tmp = X_hrf_mag_tmp.expand_dims('subj')
+        X_hrf_mag_subj_tmp = X_hrf_mag_subj_tmp.assign_coords(subj=[subj_ids[idx_subj]])
+
+        X_mse_subj_tmp = X_mse.copy().expand_dims('subj')
+        X_mse_subj_tmp = X_mse_subj_tmp.assign_coords(subj=[subj_ids[idx_subj]])
+
+        X_hrf_mag_subj = xr.concat([X_hrf_mag_subj, X_hrf_mag_subj_tmp], dim='subj')
+        X_mse_subj = xr.concat([X_mse_subj, X_mse_subj_tmp], dim='subj')
+
+        X_hrf_mag_weighted = X_hrf_mag_weighted + X_hrf_mag_tmp / X_mse
+        X_mse_inv_weighted = X_mse_inv_weighted + 1 / X_mse
+    else:
+        print(f"   Subject {subj_ids[idx_subj]} excluded from group average")
+
+# %%
+
+# get the average
+X_hrf_mag_mean = X_hrf_mag_subj.mean('subj')
+X_hrf_mag_mean_weighted = X_hrf_mag_weighted / X_mse_inv_weighted
+
+X_mse_mean_within_subject = 1 / X_mse_inv_weighted
+
+X_mse_subj_tmp = X_mse_subj.copy()
+X_mse_subj_tmp = xr.where(X_mse_subj_tmp < 1e-6, 1e-6, X_mse_subj_tmp)
+X_mse_weighted_between_subjects_tmp = (X_hrf_mag_subj - X_hrf_mag_mean)**2 / X_mse_subj_tmp
+X_mse_weighted_between_subjects = X_mse_weighted_between_subjects_tmp.mean('subj')
+X_mse_weighted_between_subjects = X_mse_weighted_between_subjects / (X_mse_subj**-1).mean('subj')
+
+X_stderr_weighted = np.sqrt( X_mse_mean_within_subject + X_mse_weighted_between_subjects )
+
+X_tstat = X_hrf_mag_mean_weighted / X_stderr_weighted
+
+#    blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
+
+filepath = os.path.join(file_path0, f'Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
+print(f'   Saving to Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
+file = gzip.GzipFile(filepath, 'wb')
+file.write(pickle.dumps([X_tstat, alpha_meas_list[-1], alpha_spatial_list[-1]]))
+file.close()     
+
+
 
 # %%
 
