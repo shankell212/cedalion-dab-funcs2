@@ -236,7 +236,7 @@ if 1:
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
     rec_str = 'od_o_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_dataset['filenm_lst'], rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, cfg_dataset['subj_ids'], subj_id_exclude, chs_pruned_subjs, cfg_dataset['root_dir'], trange_hrf_stat )
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = blockaverage_mean_tmp
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
@@ -259,7 +259,7 @@ if flag_save_each_subj:
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
 
-file_path_pkl = os.path.join(rootDir_data, 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
+file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
 file = gzip.GzipFile(file_path_pkl, 'wb')
 
 if 'chromo' in blockaverage.dims:
@@ -431,7 +431,7 @@ alpha_meas_list = [1e0] #[1e-2, 1e-3, 1e-5] #[1e-3]
 alpha_spatial_list = [1e-1]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
 
 
-file_path0 = rootDir_data + 'derivatives/processed_data/'
+file_path0 = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
 wavelength = rec[0][0]['amp'].wavelength.values
 spectrum = 'prahl'
 
@@ -443,12 +443,12 @@ D = None
 for idx_subj in range(n_subjects):
 
 
-    hrf_od_mag = y_subj.sel(subj=subj_ids[idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+    hrf_od_mag = y_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
     # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
     # get the image
     trial_type_img_split = trial_type_img.split('-')
-    C_meas = y_mse_subj.sel(subj=subj_ids[idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type
+    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
     if C is None or D is None:
@@ -470,20 +470,20 @@ for idx_subj in range(n_subjects):
     if X_hrf_mag_subj is None:
         X_hrf_mag_subj = X_hrf_mag_tmp
         X_hrf_mag_subj = X_hrf_mag_subj.expand_dims('subj')
-        X_hrf_mag_subj = X_hrf_mag_subj.assign_coords(subj=[subj_ids[idx_subj]])
+        X_hrf_mag_subj = X_hrf_mag_subj.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
 
         X_mse_subj = X_mse.copy()
         X_mse_subj = X_mse_subj.expand_dims('subj')
-        X_mse_subj = X_mse_subj.assign_coords(subj=[subj_ids[idx_subj]])
+        X_mse_subj = X_mse_subj.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
 
         X_hrf_mag_weighted = X_hrf_mag_tmp / X_mse
         X_mse_inv_weighted = 1 / X_mse
-    elif subj_ids[idx_subj] not in subj_id_exclude:
+    elif cfg_dataset['subj_ids'][idx_subj] not in subj_id_exclude:
         X_hrf_mag_subj_tmp = X_hrf_mag_tmp.expand_dims('subj')
-        X_hrf_mag_subj_tmp = X_hrf_mag_subj_tmp.assign_coords(subj=[subj_ids[idx_subj]])
+        X_hrf_mag_subj_tmp = X_hrf_mag_subj_tmp.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
 
         X_mse_subj_tmp = X_mse.copy().expand_dims('subj')
-        X_mse_subj_tmp = X_mse_subj_tmp.assign_coords(subj=[subj_ids[idx_subj]])
+        X_mse_subj_tmp = X_mse_subj_tmp.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
 
         X_hrf_mag_subj = xr.concat([X_hrf_mag_subj, X_hrf_mag_subj_tmp], dim='subj')
         X_mse_subj = xr.concat([X_mse_subj, X_mse_subj_tmp], dim='subj')
@@ -491,7 +491,7 @@ for idx_subj in range(n_subjects):
         X_hrf_mag_weighted = X_hrf_mag_weighted + X_hrf_mag_tmp / X_mse
         X_mse_inv_weighted = X_mse_inv_weighted + 1 / X_mse
     else:
-        print(f"   Subject {subj_ids[idx_subj]} excluded from group average")
+        print(f"   Subject {cfg_dataset['subj_ids'][idx_subj]} excluded from group average")
 
 # %%
 
@@ -516,7 +516,7 @@ X_tstat = X_hrf_mag_mean_weighted / X_stderr_weighted
 filepath = os.path.join(file_path0, f'Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 print(f'   Saving to Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 file = gzip.GzipFile(filepath, 'wb')
-file.write(pickle.dumps([X_tstat, alpha_meas_list[-1], alpha_spatial_list[-1]]))
+file.write(pickle.dumps([X_hrf_mag_mean_weighted, alpha_meas_list[-1], alpha_spatial_list[-1]]))
 file.close()     
 
 
