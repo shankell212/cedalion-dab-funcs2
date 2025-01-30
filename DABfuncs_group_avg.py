@@ -18,7 +18,7 @@ import matplotlib.pyplot as p
 
 import pdb
 
-def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, t_win ):
+def run_group_block_average( rec, filenm_lst, rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, t_win ):
 
     n_subjects = len(rec)
     n_files_per_subject = len(rec[0])
@@ -36,9 +36,6 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
             # do the block average on the data in rec[subj_idx][file_idx][rec_str]
             # rec_str could be 'conc_tddr', 'conc_tddr_ica' or 'od' or even conc_splineSG
             conc_filt = rec[subj_idx][file_idx][rec_str].copy()
-            # FIXME: should I do this here now that this code has evolved? Seems like it should be handled before this function.
-            # FIXME: oddly it is turning my tddr-ica to nan
-            # conc_filt = cedalion.sigproc.frequency.freq_filter(conc_filt, 0 * units.Hz, ica_lpf ) # LPF the data to match the ICA data
 
             #
             # block average
@@ -64,14 +61,14 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
                                     )
                 
             # concatenate the different epochs from each file for each subject
+            if flag_save_each_subj:
+                conc_epochs_tmp = conc_epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_tmp.trial_type.values]))
+
             if file_idx == 0:
                 conc_epochs_all = conc_epochs_tmp
             else:
                 conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
 
-            if flag_save_each_subj:
-                conc_epochs_tmp = conc_epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_tmp.trial_type.values]))
-                conc_epochs_all = xr.concat([conc_epochs_all, conc_epochs_tmp], dim='epoch')
 
             # DONE LOOP OVER FILES
 
@@ -88,9 +85,14 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
         blockaverage_weighted = blockaverage.copy()
         n_epochs = conc_epochs.shape[0]
         n_chs = conc_epochs.shape[2]
-        
-        
-        foo = conc_epochs - blockaverage_weighted[0,:,:,:] # FIXME: assuming one trial_type
+
+#        foo = conc_epochs - blockaverage_weighted[0,:,:,:] # FIXME: assuming one trial_type
+        foo = conc_epochs - blockaverage_weighted.isel(trial_type=0) # FIXME: assuming one trial_type
+
+        # # FIXME: start of solution for more than one trial_type        
+        # for trial_type in blockaverage.trial_type.values:
+        #     foo = conc_epochs.sel(trial_type=trial_type) - blockaverage_weighted.sel(trial_type=trial_type) 
+
         if 'chromo' in conc_filt.dims:
             foo_t = foo.stack(measurement=['channel','chromo']).sortby('chromo')
         else:
@@ -129,6 +131,7 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
 
         # where mse_t is 0, set it to mse_val_for_bad_data
         # I am trying to handle those rare cases where the mse is 0 for some subjects and then it corrupts 1/mse
+        # FIXME: why does this happen sometimes?
         idx_bad = np.where(mse_t == 0)[0]
         idx_bad1 = idx_bad[idx_bad<n_chs]
         idx_bad2 = idx_bad[idx_bad>=n_chs] - n_chs
@@ -195,6 +198,7 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
     mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj_tmp
     mse_weighted_between_subjects = mse_weighted_between_subjects_tmp.mean('subj')
     mse_weighted_between_subjects = mse_weighted_between_subjects * mse_mean_within_subject
+    # FIXME: is it an issue that mse_mean_within_subject comes from mse_t and blockaverage_mse_subj_tmp comes from mse_t_o?
  
     # blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
     blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )

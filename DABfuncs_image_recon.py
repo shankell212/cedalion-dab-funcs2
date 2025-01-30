@@ -20,7 +20,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import sys
-sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\IWHD_esplanade\\Python implentation')
+
 import spatial_basis_funs_ced as sbf 
 
 
