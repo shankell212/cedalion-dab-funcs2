@@ -76,7 +76,6 @@ snr_thresh = 5 # the SNR (std/mean) of a channel.
 sd_threshs = [1, 60]*units.mm # defines the lower and upper bounds for the source-detector separation that we would like to keep
 amp_threshs = [1e-5, 0.84] # define whether a channel's amplitude is within a certain range
                            # reduced from 0.89 to 0.84 because saturation goes lower
-
 # motion correction parameters
 flag_do_splineSG = False # if True, will do splineSG motion correction
 
