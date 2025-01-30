@@ -60,27 +60,53 @@ def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
 
 
 
-def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wavelength = [760,850], BRAIN_ONLY = False, SB = False, sb_cfg = None, alpha_spatial_list = [1e-3], alpha_meas_list = [1e-3], file_save = False, file_path = None, trial_type_img = None, W = None ):
+def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wavelength = [760,850], BRAIN_ONLY = False, SB = False, sb_cfg = None, alpha_spatial_list = [1e-3], alpha_meas_list = [1e-3], file_save = False, file_path = None, trial_type_img = None, W = None, C = None, D = None  ):
 
     print( 'Starting Image Reconstruction')
 
     #
     # prune the data and sensitivity profile
     #
-    od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
 
+    # FIXME: I am checking both wavelengths since I have to prune both if one is null to get consistency between A_pruned and od_mag_pruned
+    #        We don't have to technically do this, but it is easier. The alternative requires have Adot_pruned for each wavelengths and checking rest of code
+    wav = hrf_od.wavelength.values
     if len(hrf_od.dims) == 2: # not a time series else it is a time series
-        pruning_mask = ~hrf_od.sel(wavelength=850).isnull()
-    else: 
-        pruning_mask = ~hrf_od.sel(wavelength=850, reltime=0).isnull()
-
-    if BRAIN_ONLY:
-        Adot_pruned = Adot[pruning_mask.values, Adot.is_brain.values, :] 
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0]).isnull() | hrf_od.sel(wavelength=wav[1]).isnull())
+    elif 'reltime' in hrf_od.dims:
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0], reltime=0).isnull() | hrf_od.sel(wavelength=wav[1], reltime=0).isnull())
     else:
-        Adot_pruned = Adot[pruning_mask.values, :, :]
-        
-    od_mag_pruned = od_mag.dropna('measurement')
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0]).mean('time').isnull() | hrf_od.sel(wavelength=wav[1]).mean('time').isnull())
 
+    if C_meas is None:
+        if BRAIN_ONLY:
+            Adot_pruned = Adot[pruning_mask.values, Adot.is_brain.values, :] 
+        else:
+            Adot_pruned = Adot[pruning_mask.values, :, :]
+            
+        od_mag_pruned = hrf_od[:,pruning_mask.values,:].stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
+        # od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
+        # od_mag_pruned = od_mag.dropna('measurement')
+    else: # don't prune anything if C_meas is not None as we use C_meas to essentially prune
+          # but we make sure the corresponding elements of C_meas are set to BAD values
+        if BRAIN_ONLY:
+            Adot_pruned = Adot[:, Adot.is_brain.values, :] 
+        else:
+            Adot_pruned = Adot
+            
+        od_mag_pruned = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
+        n_chs = hrf_od.channel.size
+        if od_mag_pruned.dims == 2:
+            od_mag_pruned[:,np.where(~pruning_mask.values)[0]] = 0
+            od_mag_pruned[:,np.where(~pruning_mask.values)[0]+n_chs] = 0
+        else:
+            od_mag_pruned[np.where(~pruning_mask.values)[0]] = 0
+            od_mag_pruned[np.where(~pruning_mask.values)[0]+n_chs] = 0
+
+        mse_val_for_bad_data = 1e1  # FIXME: this should be passed here nad to group_avg
+        # FIXME: I assume C_meas is 1D. If it is 2D then I need to do this to the columns and rows
+        C_meas[np.where(~pruning_mask.values)[0]] = mse_val_for_bad_data
+        C_meas[np.where(~pruning_mask.values)[0] + n_chs] = mse_val_for_bad_data
 
     #
     # create the sensitivity matrix for HbO and HbR
@@ -150,15 +176,16 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
 
     # Ensure A is a numpy array
     A = np.array(A)
-    B = np.sum((A ** 2), axis=0)
-    b = B.max()
 
     for alpha_spatial in alpha_spatial_list:
                         
-        if not BRAIN_ONLY and W is None:
+        if not BRAIN_ONLY and W is None and C is None and D is None:
 
             print( f'   Doing spatial regularization with alpha_spatial = {alpha_spatial}')
             # GET A_HAT
+            B = np.sum((A ** 2), axis=0)
+            b = B.max()
+
             lambda_spatial = alpha_spatial * b
             
             L = np.sqrt(B + lambda_spatial)
@@ -174,6 +201,8 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             
             C = F #A @ (Linv ** 2) @ A.T
             D = Linv**2 @ A.T
+        else:
+            f = max(np.diag(C))
             
         for alpha_meas in alpha_meas_list:
             
@@ -210,11 +239,19 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                                     coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values)))},
                                     )
                 else:
-                    X = xr.DataArray(X, 
-                                    dims = ('vertex', 'reltime'),
-                                    coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
-                                            'reltime': od_mag_pruned.reltime.values},
-                                    )
+                    # FIXME: check if it is 'reltime' or 'time' and assign appropriately
+                    if 'reltime' in hrf_od.dims:
+                        X = xr.DataArray(X, 
+                                        dims = ('vertex', 'reltime'),
+                                        coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
+                                                'reltime': od_mag_pruned.reltime.values},
+                                        )
+                    else:
+                        X = xr.DataArray(X, 
+                                        dims = ('vertex', 'time'),
+                                        coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
+                                                'time': od_mag_pruned.time.values},
+                                        )
                 
             else:
                 if SB:
@@ -254,13 +291,22 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                                             'is_brain':('vertex', Adot.coords['is_brain'].values)},
                                     )
                     X = X.set_xindex('parcel')
-                else:                
+                elif 'reltime' in hrf_od.dims:
                     X = xr.DataArray(X,
                                         dims = ('vertex', 'reltime', 'chromo'),
                                         coords = {'chromo': ['HbO', 'HbR'],
                                                 'parcel': ('vertex',Adot.coords['parcel'].values),
                                                 'is_brain':('vertex', Adot.coords['is_brain'].values),
                                                 'reltime': od_mag_pruned.reltime.values},
+                                        )
+                    X = X.set_xindex("parcel")
+                else:
+                    X = xr.DataArray(X,
+                                        dims = ('vertex', 'time', 'chromo'),
+                                        coords = {'chromo': ['HbO', 'HbR'],
+                                                'parcel': ('vertex',Adot.coords['parcel'].values),
+                                                'is_brain':('vertex', Adot.coords['is_brain'].values),
+                                                'time': od_mag_pruned.time.values},
                                         )
                     X = X.set_xindex("parcel")
 
@@ -280,9 +326,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             # end loop over alpha_meas
         # end loop over alpha_spatial
 
-    C_norm = C / f
-
-    return X, W, C_norm
+    return X, W, C, D
 
 
 
