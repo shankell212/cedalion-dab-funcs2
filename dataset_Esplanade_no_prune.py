@@ -467,8 +467,8 @@ for idx_subj in range(n_subjects):
     # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
     # get the image
-    trial_type_img_split = trial_type_img.split('-')
-    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type
+#    trial_type_img_split = trial_type_img.split('-')
+    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # FIXME: handle more than one trial_type
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
     if C is None or D is None:
@@ -592,36 +592,6 @@ X_foo[np.isin(X_foo['parcel'].values, parcels_sel), 0] = 1
 
 p0 = pfDAB_img.plot_image_recon(X_foo, head, 'hbo_brain', 'left')
 
-
-# %% plot SVS of the MSE compared with that of A A.T
-##############################################################################
-
-u,s,v = np.linalg.svd(AAT_norm) # FIXME: I changed above to return C and D, not AAT_norm... it is close
-u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
-
-f,ax = p.subplots(2,1,figsize=(8,10))
-
-ax1 = ax[0]
-ax1.semilogy(AAT_norm.diagonal(),label='A A.T') # FIXME: I changed above to return C and D, not AAT_norm... it is close
-ax1.semilogy(cov_mean_weighted.diagonal()*alpha_meas_list[-1],label='MSE')
-ax1.legend()
-ax1.set_title(fr'Diagonal of (A A.T)/norm and MSE*$\alpha_{{meas}}$={alpha_meas_list[-1]:.2e}')
-
-ax1 = ax[1]
-ax1.semilogy(s,label='A A.T')
-ax1.semilogy(s1,label='MSE')
-ax1.legend()
-ax1.set_title(r'Singular Values of (A A.T)/norm and MSE*$\alpha_{{meas}}$')
-
-p.show()
-
-# give a title to the figure
-dirnm = os.path.basename(os.path.normpath(rootDir_data))
-p.suptitle(f'Data set - {dirnm}')
-
-p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_AAT_svs.png") )
-
-p.show()
 
 
 
