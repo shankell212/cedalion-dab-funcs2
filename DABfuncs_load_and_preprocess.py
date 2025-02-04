@@ -24,6 +24,7 @@ import DABfuncs_plot_DQR as pfDAB_dqr
 
 
 
+
 def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
 
     # make sure derivatives folders exist
@@ -69,12 +70,15 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
                 stim_df = pd.read_csv( file_path[:-5] + '_events.tsv', sep='\t' )
                 recTmp.stim = stim_df
 
+            
+
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
 
             # calculate optical density
             recTmp["od"] = cedalion.nirs.int2od(recTmp['amp_pruned'])
             recTmp["od_o"] = cedalion.nirs.int2od(recTmp['amp'])
+            
 
             # Calculate gvtd
             recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
@@ -87,7 +91,10 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
             slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
             slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
+
+
             # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
+
 
             # Spline SG
             if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
@@ -99,22 +106,27 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
 
+
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
             slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
             slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
             slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
+
             # GVTD for TDDR before bandpass filtering
             amp_tddr = recTmp['od_tddr'].copy()
             amp_tddr.values = np.exp(-amp_tddr.values)
             recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
+            
+            
 
             # bandpass filter od_tddr
             fmin = cfg_preprocess['cfg_bandpass']['fmin']
             fmax = cfg_preprocess['cfg_bandpass']['fmax']
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
+
 
             # SplineSG Conc
             dpf = xr.DataArray(
@@ -128,8 +140,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-
-
 
             #
             # Plot DQRs
