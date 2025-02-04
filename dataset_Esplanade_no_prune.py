@@ -1,6 +1,6 @@
 # %% Imports
 ##############################################################################
-%matplotlib widget
+#%matplotlib widget
 
 import os
 import cedalion
@@ -23,7 +23,8 @@ import pickle
 
 # import my own functions from a different directory
 import sys
-sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
+#sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
+sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\cedalion-dab-funcs2')
 import DABfuncs_load_and_preprocess as pfDAB
 import DABfuncs_plot_DQR as pfDAB_dqr
 import DABfuncs_group_avg as pfDAB_grp_avg
@@ -41,22 +42,34 @@ warnings.filterwarnings('ignore')
 import importlib
 importlib.reload(pfDAB_dqr)
 importlib.reload(pfDAB)
+importlib.reload(pfDAB_grp_avg)
 
 
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
+use_saved_data = 1  # if 1, will skip load_and_preprocess function and use saved data
+rootDir_saveData = 'D:\\fNIRS\\DATA\\Interactive_Walking_HD\\derivatives\\processed_data\\'
+
 
 cfg_dataset = {
-    'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
-    'subj_ids' : ['01','02','03','04','05','06','07','08','09'],
-    'file_ids' : ['STS_run-01'],
-    'filenm_lst' : None,
-    'subj_id_exclude' : [] #['05','07'] # if you want to exclude a subject from the group average
+    #'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
+    'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
+    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    'file_ids' : ['IWHD_run-01'],
+    'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
+    #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
 }
 
+# Add 'filenm_lst' separately after cfg_dataset is initialized
+cfg_dataset['filenm_lst'] = [
+    [f"sub-{subj_id}_task-{file_id}_nirs"] 
+    for subj_id in cfg_dataset['subj_ids'] 
+    for file_id in cfg_dataset['file_ids']
+    ]
+
 cfg_dqr = {
-    'stim_lst_dqr' : ['STS']
+    'stim_lst_dqr' : ['STS'] # FIXME: why have multiple of this
 }
 
 cfg_prune = {
@@ -93,7 +106,14 @@ cfg_preprocess = {
 }
 
 
+cfg_blockavg = {
+    'trange_hrf' : [5, 35] * units.s,
+    'trange_hrf_stat' : [10, 20],
+    'stim_lst_hrf' : ['ST', 'DT'], # FIXME: why have multiple of this
+    'flag_save_each_subj' : False  # if True, will save the block average data for each subject
+    }
 
+cfg_erbmICA = {}
 
 
 
@@ -146,7 +166,16 @@ for subj_id in cfg_dataset['subj_ids']:
 
 
 # main load and preprocessing function
-rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
+if not use_saved_data:
+    print("Running load and process function")
+    rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
+    
+else:
+    print("Loading saved data")
+    with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts.pkl'), 'rb') as f:
+         rec = pickle.load(f)
+    with gzip.open( os.path.join(rootDir_saveData, 'chs_pruned_subjs_ts.pkl'), 'rb') as f:
+         chs_pruned_subjs = pickle.load(f)
 
 
 
@@ -199,62 +228,54 @@ import importlib
 importlib.reload(pfDAB_grp_avg)
 
 
-trange_hrf = [5, 35] * units.s # time range for block averaging
-trange_hrf_stat = [10, 20] # time range for t-stat
-stim_lst_hrf = ['STS'] # for calculating HRFs
-
 # FIXME: should not be needed here... shouldbe handled in ICA step above
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
-subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the group average
 
-
-flag_save_each_subj = False # if True, will save the block average data for each subject
-
-if 0:
+if 1:
     rec_str = 'conc_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
     blockaverage_mean = y_mean
 
-    rec_str = 'conc_tddr_pca'
-    y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
-    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    # rec_str = 'conc_tddr_pca'
+    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    rec_str = 'conc_tddr_ica'
-    y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
-    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    # rec_str = 'conc_tddr_ica'
+    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
     # rec_str = 'conc_tddr_glm'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-if 1:
+if 0:
     # rec_str = 'conc_o_tddr' # just doing this because I want the DQR scalp plot for this
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
     rec_str = 'od_o_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_dataset['filenm_lst'], rec_str, trange_hrf, stim_lst_hrf, flag_save_each_subj, cfg_dataset['subj_ids'], subj_id_exclude, chs_pruned_subjs, cfg_dataset['root_dir'], trange_hrf_stat )
+    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = blockaverage_mean_tmp
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
     # rec_str = 'od_o_tddr_pca'
-    # y_mean, y_mean_weighted_pca, y_stderr_weighted_pca, _, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    # y_mean, y_mean_weighted_pca, y_stderr_weighted_pca, _, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     # blockaverage_mean_tmp = y_mean_weighted_pca.assign_coords(trial_type=[x + '-o-pca' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
     # rec_str = 'od_o_tddr_ica'
-    # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, _, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, _, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     # blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 # save the results to a pickle file
 blockaverage = blockaverage_mean
 
-if flag_save_each_subj:
+if cfg_blockavg['flag_save_each_subj']:
     # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
@@ -286,7 +307,6 @@ blockaverage_all = blockaverage.copy()
 blockaverage_all_o = blockaverage_all.copy()
 
 print('Saved group average HRF to ' + file_path_pkl)
-
 
 
 
@@ -333,7 +353,7 @@ alpha_meas_list = [1e0] #[1e-2, 1e-3, 1e-5] #[1e-3]
 alpha_spatial_list = [1e-1]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
 
 
-file_path0 = rootDir_data + 'derivatives/processed_data/'
+file_path0 = cfg_dataset['rootDir'] + 'derivatives/processed_data/'
 wavelength = rec[0][0]['amp'].wavelength.values
 spectrum = 'prahl'
 
