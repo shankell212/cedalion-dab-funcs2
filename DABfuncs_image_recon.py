@@ -329,7 +329,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
 
 
 
-def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
+def plot_image_recon( X, head, shape, iax, flag_hbx='hbo_brain', view_position='superior', p0 = None, title_str = None ):
     # pos_names = ['superior', 'left']
 
     #
@@ -345,20 +345,23 @@ def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
     X_hbo_scalp = X[~X.is_brain.values, 0]
     X_hbr_scalp = X[~X.is_brain.values, 1]
 
-    pos_names = ['superior', 'left', 'right', 'anterior', 'posterior']
+    pos_names = ['superior', 'left', 'right', 'anterior', 'posterior','scale_bar']
     positions = [ 'xy',
-        [(-547.808328867038, 96.55047760772226, 130.5057670434646),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(547.808328867038, 96.55047760772226, 130.5057670434646),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(100, 1000, 100),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(100, -1000, 100),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)]
+        [(-400., 96., 130.),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(600, 96., 130.),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, 500, 200),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, -300, 300),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, -300, 300),
+        (96., 115., 165.),
+        (0,0,1)]
     ]
     clim=(-X_hbo_brain.max(), X_hbo_brain.max())
 
@@ -366,41 +369,49 @@ def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
     idx = [i for i, s in enumerate(pos_names) if view_position in s]
 
     pos = positions[idx[0]]
-    p0 = pv.Plotter(shape=(1,1), window_size = [600, 600])
+
+    if p0 is None:
+        p0 = pv.Plotter(shape=(shape[0],shape[1]), window_size = [2000, 1500])
 #        p.add_text(f"Group average with alpha_meas = {alpha_meas} and alpha_spatial = {alpha_spatial}", position='upper_left', font_size=12, viewport=True)
-    
+
+    p0.subplot(iax[0], iax[1])
+
+    show_scalar_bar = False
+
     if flag_hbx == 'hbo_brain': # hbo brain 
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)
-        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
         p0.camera_position = pos
-        p0.add_text('HbO Brain', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbr_brain': # hbr brain
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)   
-        p0.subplot(0,0)      
-        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
         p0.camera_position = pos
-        p0.add_text('HbR Brain', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbo_scalp': # hbo scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)         
-        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
         p0.camera_position = pos
-        p0.add_text('HbO Scalp', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbr_scalp': # hbr scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)         
-        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
         p0.camera_position = pos
-        p0.add_text('HbR Scalp', position='lower_left', font_size=10)
 
-    p0.show( )
+    if iax[0] == 1 and iax[1] == 1:
+        p0.clear_actors()
+        p0.add_scalar_bar(title=title_str, vertical=False, position_x=0.1, position_y=0.5,
+                          height=0.1, width=0.8, fmt='%.1e',
+                          label_font_size=24, title_font_size=32 )  # Add it separately
+    else:
+        p0.add_text(view_position, position='lower_left', font_size=10)
+
+    # save pyvista figure
+    # p0.screenshot( os.path.join(root_dir, 'derivatives', 'plots', f'IMG.png') )
+    # p0.close()
 
     return p0
