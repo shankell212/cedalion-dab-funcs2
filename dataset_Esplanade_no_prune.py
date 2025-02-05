@@ -395,7 +395,7 @@ print('Done with Image Reconstruction')
 ##############################################################################
 
 # scale columns of W by y_stderr_weighted**2
-cov_img_tmp = W * np.sqrt(C_meas.values)
+cov_img_tmp = W * np.sqrt(C_meas.values) # W is pseudo inverse  --- diagonal (faster than W C W.T)
 cov_img_diag = np.nansum(cov_img_tmp**2, axis=1)
 
 nV = X_grp.shape[0]
@@ -457,36 +457,40 @@ spectrum = 'prahl'
 
 
 X_hrf_mag_subj = None
-C = None
+C = None # spatial regularization 
 D = None
 
+# !!! go thru each trial type (outside function)
+    # 
 for idx_subj in range(n_subjects):
 
-
+# !!!vstart trial type loop
     hrf_od_mag = y_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
     # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
     # get the image
     trial_type_img_split = trial_type_img.split('-')
-    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type
+    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type -- he was getting rid of trial type dim
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
     if C is None or D is None:
-        X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+        X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img) 
     else:
         X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img, None, C, D)
 
     # get image noise
-    cov_img_tmp = W * np.sqrt(C_meas.values)
+    cov_img_tmp = W * np.sqrt(C_meas.values) # get diag of image covariance
     cov_img_diag = np.nansum(cov_img_tmp**2, axis=1)
 
     nV = X_hrf_mag_tmp.vertex.size
     cov_img_diag = np.reshape( cov_img_diag, (2,nV) ).T
 
-    X_mse = X_hrf_mag_tmp.copy()
+    X_mse = X_hrf_mag_tmp.copy() 
     X_mse.values = cov_img_diag
+    
+    # !!! end trial type loop
 
-    # weighted average
+    # weighted average -- same as chan space - but now is vertex space
     if X_hrf_mag_subj is None:
         X_hrf_mag_subj = X_hrf_mag_tmp
         X_hrf_mag_subj = X_hrf_mag_subj.expand_dims('subj')
@@ -499,7 +503,7 @@ for idx_subj in range(n_subjects):
         X_hrf_mag_weighted = X_hrf_mag_tmp / X_mse
         X_mse_inv_weighted = 1 / X_mse
     elif cfg_dataset['subj_ids'][idx_subj] not in subj_id_exclude:
-        X_hrf_mag_subj_tmp = X_hrf_mag_tmp.expand_dims('subj')
+        X_hrf_mag_subj_tmp = X_hrf_mag_tmp.expand_dims('subj') # !!! will need to expand dims to get back trial type -- can do in function 
         X_hrf_mag_subj_tmp = X_hrf_mag_subj_tmp.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
 
         X_mse_subj_tmp = X_mse.copy().expand_dims('subj')
@@ -513,6 +517,7 @@ for idx_subj in range(n_subjects):
     else:
         print(f"   Subject {cfg_dataset['subj_ids'][idx_subj]} excluded from group average")
 
+
 # %%
 
 # get the average
@@ -523,7 +528,7 @@ X_mse_mean_within_subject = 1 / X_mse_inv_weighted
 
 X_mse_subj_tmp = X_mse_subj.copy()
 X_mse_subj_tmp = xr.where(X_mse_subj_tmp < 1e-6, 1e-6, X_mse_subj_tmp)
-X_mse_weighted_between_subjects_tmp = (X_hrf_mag_subj - X_hrf_mag_mean)**2 / X_mse_subj_tmp
+X_mse_weighted_between_subjects_tmp = (X_hrf_mag_subj - X_hrf_mag_mean)**2 / X_mse_subj_tmp # X_mse_subj_tmp is weights for each sub
 X_mse_weighted_between_subjects = X_mse_weighted_between_subjects_tmp.mean('subj')
 X_mse_weighted_between_subjects = X_mse_weighted_between_subjects / (X_mse_subj**-1).mean('subj')
 
@@ -633,9 +638,9 @@ X_foo[np.isin(X_foo['parcel'].values, parcels_sel), 0] = 1
 p0 = pfDAB_img.plot_image_recon(X_foo, head, 'hbo_brain', 'left')
 
 
-# %% plot SVS of the MSE compared with that of A A.T
+# %% plot SVS of the MSE compared with that of A A.T 
 ##############################################################################
-
+# singular value spectrum of mse
 u,s,v = np.linalg.svd(AAT_norm) # FIXME: I changed above to return C and D, not AAT_norm... it is close
 u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
 
