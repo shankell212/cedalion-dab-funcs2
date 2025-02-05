@@ -471,6 +471,10 @@ for idx_subj in range(n_subjects):
     # get the image
     trial_type_img_split = trial_type_img.split('-')
     C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime').mean('trial_type') # FIXME: handle more than one trial_type -- he was getting rid of trial type dim
+
+#    trial_type_img_split = trial_type_img.split('-')
+    C_meas = y_mse_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # FIXME: handle more than one trial_type
+
     C_meas = C_meas.pint.dequantify()
     C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
     if C is None or D is None:
@@ -502,6 +506,7 @@ for idx_subj in range(n_subjects):
 
         X_hrf_mag_weighted = X_hrf_mag_tmp / X_mse
         X_mse_inv_weighted = 1 / X_mse
+        X_mse_inv_weighted_max = 1 / X_mse
     elif cfg_dataset['subj_ids'][idx_subj] not in subj_id_exclude:
         X_hrf_mag_subj_tmp = X_hrf_mag_tmp.expand_dims('subj') # !!! will need to expand dims to get back trial type -- can do in function 
         X_hrf_mag_subj_tmp = X_hrf_mag_subj_tmp.assign_coords(subj=[cfg_dataset['subj_ids'][idx_subj]])
@@ -514,6 +519,7 @@ for idx_subj in range(n_subjects):
 
         X_hrf_mag_weighted = X_hrf_mag_weighted + X_hrf_mag_tmp / X_mse
         X_mse_inv_weighted = X_mse_inv_weighted + 1 / X_mse
+        X_mse_inv_weighted_max = np.maximum(X_mse_inv_weighted_max, 1 / X_mse)
     else:
         print(f"   Subject {cfg_dataset['subj_ids'][idx_subj]} excluded from group average")
 
@@ -536,91 +542,49 @@ X_stderr_weighted = np.sqrt( X_mse_mean_within_subject + X_mse_weighted_between_
 
 X_tstat = X_hrf_mag_mean_weighted / X_stderr_weighted
 
+X_weight_sum = X_mse_inv_weighted / X_mse_inv_weighted_max 
+# FIXME: I am trying to get something like number of subjects per vertex...
+# maybe I need to change X_mse_inv_weighted_max to be some typical value 
+# because when all subjects have a really low value, then it won't scale the way I want
+
 #    blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
 
 filepath = os.path.join(file_path0, f'Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 print(f'   Saving to Xs_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 file = gzip.GzipFile(filepath, 'wb')
-file.write(pickle.dumps([X_hrf_mag_mean_weighted, alpha_meas_list[-1], alpha_spatial_list[-1]]))
+file.write(pickle.dumps([X_weight_sum, alpha_meas_list[-1], alpha_spatial_list[-1]]))
 file.close()     
 
 
-
 # %%
-
-subj_ts = rec[idx_subj][0]['od_o_tddr'].transpose('wavelength','channel','time')
-
-C_meas = y_mse_subj[idx_subj,:,:,:,:].mean('reltime').mean('trial_type')
-C_meas = C_meas.pint.dequantify()
-C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
-
-X_subj_ts, W, C, D = pfDAB_img.do_image_recon( subj_ts, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
-
-# %%
-
-import importlib
-importlib.reload(pfDAB_grp_avg)
-
-
-trange_hrf = [5, 35] * units.s # time range for block averaging
-trange_hrf_stat = [10, 20] # time range for t-stat
-stim_lst_hrf = ['STS'] # for calculating HRFs
-
-ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
-
-subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the group average
-
-
-flag_save_each_subj = False # if True, will save the block average data for each subject
-
-stim = rec[idx_subj][0].stim
-
-foo_subj_ts = X_subj_ts.copy()
-#foo_subj_ts = foo_subj_ts.rename({'vertex':'channel'})
-#foo_subj_ts = foo_subj_ts.transpose('chromo','channel','time')
-foo_subj_ts = foo_subj_ts.assign_coords(samples=("time", range(foo_subj_ts.sizes["time"])))
-foo_subj_ts.time.attrs['units'] = 'second'
-
-foo_epochs_tmp = foo_subj_ts.cd.to_epochs(
-                            stim,  # stimulus dataframe
-                            set(stim[stim.trial_type.isin(stim_lst_hrf)].trial_type), # select events
-                            before=trange_hrf[0],  # seconds before stimulus
-                            after=trange_hrf[1],  # seconds after stimulus
-                        )
-
-
-#y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
-
-
-# %%
-X_subj_ts_all = None
-for idx_subj in range(n_subjects):
-    print(f'Processing subject {subj_ids[idx_subj]}')
-    subj_ts = rec[idx_subj][0]['od_o_tddr'].transpose('wavelength','channel','time')
-
-    C_meas = y_mse_subj[idx_subj,:,:,:,:].mean('reltime').mean('trial_type')
-    C_meas = C_meas.pint.dequantify()
-    C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
-
-    if X_subj_ts_all is None:
-        X_subj_ts, W, C, D = pfDAB_img.do_image_recon( subj_ts, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
-        X_subj_ts_all = X_subj_ts
-    else:
-        W_tmp = None
-        X_subj_ts, _, _, _ = pfDAB_img.do_image_recon( subj_ts, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img, W_tmp, C, D)
-        X_subj_ts_all = xr.concat([X_subj_ts_all, X_subj_ts], dim='subj')
-
-
+Adot_brain = Adot.copy()
+Adot_brain.data = Adot_brain.data[:,0:head.nV]
 
 
 
 
 # %% Plot the images
 ##############################################################################
+import importlib
+importlib.reload(pfDAB_img)
 
-p0 = pfDAB_img.plot_image_recon(X_tstat, head, 'hbo_brain', 'left')
+#foo_img = X_hrf_mag_mean_weighted
+foo_img = X_tstat
 
-#p0.disable()
+#title_str = 'HbO'
+title_str = 'HbO t-stat'
+
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), 'hbo_brain', 'scale_bar', None, title_str)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), 'hbo_brain', 'left', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), 'hbo_brain', 'superior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), 'hbo_brain', 'right', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), 'hbo_brain', 'anterior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), 'hbo_brain', 'posterior', p0)
+
+p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', f'IMG.png') )
+p0.close()
+
+
 # %%
 X_foo = X_tstat.copy()
 X_foo[:,0] = 0
@@ -636,38 +600,6 @@ X_foo[np.isin(X_foo['parcel'].values, parcels_sel), 0] = 1
 
 
 p0 = pfDAB_img.plot_image_recon(X_foo, head, 'hbo_brain', 'left')
-
-
-# %% plot SVS of the MSE compared with that of A A.T 
-##############################################################################
-# singular value spectrum of mse
-u,s,v = np.linalg.svd(AAT_norm) # FIXME: I changed above to return C and D, not AAT_norm... it is close
-u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
-
-f,ax = p.subplots(2,1,figsize=(8,10))
-
-ax1 = ax[0]
-ax1.semilogy(AAT_norm.diagonal(),label='A A.T') # FIXME: I changed above to return C and D, not AAT_norm... it is close
-ax1.semilogy(cov_mean_weighted.diagonal()*alpha_meas_list[-1],label='MSE')
-ax1.legend()
-ax1.set_title(fr'Diagonal of (A A.T)/norm and MSE*$\alpha_{{meas}}$={alpha_meas_list[-1]:.2e}')
-
-ax1 = ax[1]
-ax1.semilogy(s,label='A A.T')
-ax1.semilogy(s1,label='MSE')
-ax1.legend()
-ax1.set_title(r'Singular Values of (A A.T)/norm and MSE*$\alpha_{{meas}}$')
-
-p.show()
-
-# give a title to the figure
-dirnm = os.path.basename(os.path.normpath(rootDir_data))
-p.suptitle(f'Data set - {dirnm}')
-
-p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_AAT_svs.png") )
-
-p.show()
-
 
 
 
