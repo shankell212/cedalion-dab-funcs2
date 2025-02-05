@@ -48,16 +48,17 @@ importlib.reload(pfDAB_grp_avg)
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
-use_saved_data = 1  # if 1, will skip load_and_preprocess function and use saved data
+flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
 rootDir_saveData = 'D:\\fNIRS\\DATA\\Interactive_Walking_HD\\derivatives\\processed_data\\'
 
 
 cfg_dataset = {
     #'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
     'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
-    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    'subj_ids' : ['14'],
     'file_ids' : ['IWHD_run-01'],
-    'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
+    'subj_id_exclude' : [], #['05','07'] # if you want to exclude a subject from the group average
     #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
 }
 
@@ -69,7 +70,7 @@ cfg_dataset['filenm_lst'] = [
     ]
 
 cfg_dqr = {
-    'stim_lst_dqr' : ['STS'] # FIXME: why have multiple of this
+    'stim_lst_dqr' : ['ST', 'DT'] # FIXME: why have multiple of this
 }
 
 cfg_prune = {
@@ -106,16 +107,33 @@ cfg_preprocess = {
 }
 
 
+cfg_mse = {
+    'mse_val_for_bad_data' : 1e7 * units.micromolar**2, 
+    'mse_amp_thresh' : 1.1e-6,
+    'mse_min_thresh' : 1e0 * units.micromolar**2,
+    'blockaverage_val' : 0 * units.micromolar
+    }
+
+# # if block averaging on OD:
+# cfg_mse = {
+#     'mse_val_for_bad_data' : 1e1, 
+#     'mse_amp_thresh' : 1.1e-6,
+#     'mse_min_thresh' : 1e-6,
+#     'blockaverage_val' : 0 
+#     }
+
+
 cfg_blockavg = {
     'trange_hrf' : [5, 35] * units.s,
     'trange_hrf_stat' : [10, 20],
     'stim_lst_hrf' : ['ST', 'DT'], # FIXME: why have multiple of this
-    'flag_save_each_subj' : False  # if True, will save the block average data for each subject
+    'flag_save_group_avg_hrf': False,
+    'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
+    'cfg_mse' : cfg_mse
     }
 
+
 cfg_erbmICA = {}
-
-
 
 
 
@@ -164,9 +182,8 @@ for subj_id in cfg_dataset['subj_ids']:
             cfg_dataset['filenm_lst'][subj_idx].append( filenm )
 
 
-
 # main load and preprocessing function
-if not use_saved_data:
+if not flag_load_preprocessed_data:
     print("Running load and process function")
     rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
     
@@ -232,7 +249,7 @@ importlib.reload(pfDAB_grp_avg)
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
 
-if 1:
+if 0:
     rec_str = 'conc_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
     blockaverage_mean = y_mean
@@ -252,7 +269,7 @@ if 1:
     # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-if 0:
+if 1:
     # rec_str = 'conc_o_tddr' # just doing this because I want the DQR scalp plot for this
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
@@ -280,35 +297,34 @@ if cfg_blockavg['flag_save_each_subj']:
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
 
-file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
-file = gzip.GzipFile(file_path_pkl, 'wb')
-
-if 'chromo' in blockaverage.dims:
-    file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
-else:
-    # convert to concentration
-    dpf = xr.DataArray(
-        [1, 1],
-        dims="wavelength",
-        coords={"wavelength": rec[0][0]['amp'].wavelength},
-    )
-    foo = blockaverage.copy()
-    foo = foo.rename({'reltime':'time'})
-    foo.time.attrs['units'] = 'second'
-    foo = cedalion.nirs.od2conc(foo, rec[0][0].geo3d, dpf, spectrum="prahl")
-    foo = foo.rename({'time':'reltime'})
-    foo = foo.transpose('trial_type','chromo','channel','reltime')
-
-    file.write(pickle.dumps([foo, rec[0][0].geo2d, rec[0][0].geo3d]))
-
-file.close()
-
-blockaverage_all = blockaverage.copy()
-blockaverage_all_o = blockaverage_all.copy()
-
-print('Saved group average HRF to ' + file_path_pkl)
-
-
+if cfg_blockavg['flag_save_group_avg_hrf']:
+    file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage_.pkl.gz')
+    file = gzip.GzipFile(file_path_pkl, 'wb')
+    
+    if 'chromo' in blockaverage.dims:
+        file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
+    else:
+        # convert to concentration
+        dpf = xr.DataArray(
+            [1, 1],
+            dims="wavelength",
+            coords={"wavelength": rec[0][0]['amp'].wavelength},
+        )
+        foo = blockaverage.copy()
+        foo = foo.rename({'reltime':'time'})
+        foo.time.attrs['units'] = 'second'
+        foo = cedalion.nirs.od2conc(foo, rec[0][0].geo3d, dpf, spectrum="prahl")
+        foo = foo.rename({'time':'reltime'})
+        foo = foo.transpose('trial_type','chromo','channel','reltime')
+    
+        file.write(pickle.dumps([foo, rec[0][0].geo2d, rec[0][0].geo3d]))
+    
+    file.close()
+    
+    blockaverage_all = blockaverage.copy()
+    blockaverage_all_o = blockaverage_all.copy()
+    
+    print('Saved group average HRF to ' + file_path_pkl)
 
 
 
