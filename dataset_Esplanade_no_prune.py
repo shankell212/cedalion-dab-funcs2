@@ -85,13 +85,22 @@ cfg_prune = {
     'flag_use_psp' : False
 }
 
+cfg_imu_glm = {'statesPerDataFrame' : 89,
+		'hWin' : np.arange(-3,5,1), # window for impulse response function 
+		'statesPerDataFrame' : 89,
+		'n_components' : [3, 2],  # [gyro, accel]       # --- note: this will change fig sizes
+        'butter_order' : 4,   # butterworth filter order
+        'Fc' : 0.1,   # cutoff freq (Hz)
+        'plot_flag_imu' : True
+}
+
 cfg_motion_correct = {
     'flag_do_splineSG' : False, # if True, will do splineSG motion correction
     'splineSG_p' : 0.99, 
     'splineSG_frame_size' : 10 * units.s,
     'flag_do_tddr' : True,
-    'flag_do_imu_glm' : False,
-    'imu_glm_params' : None
+    'flag_do_imu_glm' : True,
+    'cfg_imu_glm' : cfg_imu_glm,
 }
 
 cfg_bandpass = { 
@@ -134,6 +143,7 @@ cfg_blockavg = {
 
 
 cfg_erbmICA = {}
+
 
 
 
@@ -181,6 +191,9 @@ for subj_id in cfg_dataset['subj_ids']:
         else:
             cfg_dataset['filenm_lst'][subj_idx].append( filenm )
 
+
+import importlib
+importlib.reload(pfDAB)
 
 # main load and preprocessing function
 if not flag_load_preprocessed_data:
