@@ -41,15 +41,23 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
         os.makedirs(der_dir)
 
 
-
     n_subjects = len(cfg_dataset['subj_ids'])
     n_files_per_subject = len(cfg_dataset['file_ids'])
 
     # loop over subjects and files
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
-
+            
             filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
+            
+            # if current sub is in subj_id_exclude, don't process this subject and move on
+            # !!! Added bc one sub doesnt have aux data and errored w/ imu_glm  -- is there a better way to screen for this?
+            # !!! if running IWHD & STS, imu_glm would error with STS .... so instead screen for AUX data before running imu glm??
+                # but STS will still have aux data.... how to handle this? 
+                
+            # if any(sub in filenm for sub in cfg_dataset['subj_id_exclude']):    
+            #     print('Skipping processing for excluded subject')
+            #     continue
 
             print( f"Loading {subj_idx+1} of {n_subjects} subjects, {file_idx+1} of {n_files_per_subject} files : {filenm}" )
 
@@ -82,12 +90,13 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
             
             # Walking filter 
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+            # check if imu vals are 0 (i.e. accel did not connect)
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.all(recTmp.aux_ts['ACCEL_X'] != 0):
                 recTmp["od_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
                 recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
                 
                 # Get the slope of 'od' before motion correction and any bandpass filtering
-                foo = recTmp['od_imu'].copy()
+                foo = recTmp['od_imu'].copy()           # !!! not really using, either plot later or delete?
                 foo = foo.pint.dequantify()
                 slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
                 slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
@@ -123,7 +132,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.all(recTmp.aux_ts['ACCEL_X'] != 0):
                 recTmp['od_imu_tddr'] = motion_correct.tddr( recTmp['od_imu'] )
                 recTmp['od_o_imu_tddr'] = motion_correct.tddr( recTmp['od_o_imu'] )
                 
@@ -147,7 +156,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.all(recTmp.aux_ts['ACCEL_X'] != 0):
                 recTmp['od_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_imu_tddr'], fmin, fmax)
                 recTmp['od_o_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_imu_tddr'], fmin, fmax)
 
@@ -166,7 +175,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
             # filtered walking conc
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.all(recTmp.aux_ts['ACCEL_X'] != 0):
                 recTmp['conc_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
                 recTmp['conc_o_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 

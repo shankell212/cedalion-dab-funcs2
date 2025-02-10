@@ -50,15 +50,15 @@ importlib.reload(pfDAB_grp_avg)
 
 flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
 rootDir_saveData = 'D:\\fNIRS\\DATA\\Interactive_Walking_HD\\derivatives\\processed_data\\'
+flag_save_preprocessed_data = True
 
 
 cfg_dataset = {
     #'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
     'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
-    #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
-    'subj_ids' : ['14'],
+    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
     'file_ids' : ['IWHD_run-01'],
-    'subj_id_exclude' : [], #['05','07'] # if you want to exclude a subject from the group average
+    'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
     #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
 }
 
@@ -132,18 +132,46 @@ cfg_mse = {
 #     }
 
 
+cfg_GLM = {
+    'drift_order' : 1,
+    'distance_threshold' : 20*units.mm, # for ssr
+    'short_channel_method' : 'mean',
+    'noise_model' : "ols",
+    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
+    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
+    }
+
+
 cfg_blockavg = {
     'trange_hrf' : [5, 35] * units.s,
     'trange_hrf_stat' : [10, 20],
     'stim_lst_hrf' : ['ST', 'DT'], # FIXME: why have multiple of this
-    'flag_save_group_avg_hrf': False,
+    'flag_do_GLM_filter' : True,
+    'cfg_GLM' : cfg_GLM,
+    'flag_save_group_avg_hrf': True,
     'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
     'cfg_mse' : cfg_mse
-    }
+    }               # !!! provide list of rec str and whether or not to save weighted for each one
 
 
 cfg_erbmICA = {}
 
+#%%
+# for idc, subj in enumerate(cfg_dataset['subj_ids']):
+#     file_id = cfg_dataset['filenm_lst'][idc][0]
+#     file_id = file_id[0:-4]
+#     path2events = cfg_dataset['root_dir'] + 'sub-' + subj + '\\nirs\\' + file_id + 'events.tsv'
+    
+#     if not os.path.exists( path2events ):
+#         print( f"Error: File {path2events} does not exist" )
+#     else:
+#         stim_df = pd.read_csv( path2events, sep='\t' )
+    
+#     stim_df.rename(columns={'amplitude': 'value'}, inplace=True)
+#     stim_df = stim_df.replace('ST', 'STS')
+    
+    
+#     #stim_df.to_csv(path2events, sep='\t', index=False)
 
 
 
@@ -195,11 +223,22 @@ for subj_id in cfg_dataset['subj_ids']:
 import importlib
 importlib.reload(pfDAB)
 
-# main load and preprocessing function
+# RUN PREPROCESSING
 if not flag_load_preprocessed_data:
     print("Running load and process function")
     rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
     
+    # SAVE preprocessed data 
+    if flag_save_preprocessed_data:
+        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'filenm_list_ts.pkl'), 'wb') as f:
+            pickle.dump(cfg_dataset['filenm_lst'], f, protocol=pickle.HIGHEST_PROTOCOL
+            )
+    
+        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'chs_pruned_subjs_ts.pkl'), 'wb') as f:
+            pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL
+            )
+        
+# LOAD in saved data
 else:
     print("Loading saved data")
     with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts.pkl'), 'rb') as f:
@@ -260,9 +299,9 @@ importlib.reload(pfDAB_grp_avg)
 
 # FIXME: should not be needed here... shouldbe handled in ICA step above
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
-
-
-if 0:
+# import pdb
+# pdb.set_trace()
+if 1:
     rec_str = 'conc_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
     blockaverage_mean = y_mean
@@ -282,7 +321,7 @@ if 0:
     # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
     # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-if 1:
+if 0:
     # rec_str = 'conc_o_tddr' # just doing this because I want the DQR scalp plot for this
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
@@ -382,7 +421,7 @@ alpha_meas_list = [1e0] #[1e-2, 1e-3, 1e-5] #[1e-3]
 alpha_spatial_list = [1e-1]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
 
 
-file_path0 = cfg_dataset['rootDir'] + 'derivatives/processed_data/'
+file_path0 = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
 wavelength = rec[0][0]['amp'].wavelength.values
 spectrum = 'prahl'
 

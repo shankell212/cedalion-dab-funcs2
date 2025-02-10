@@ -21,6 +21,7 @@ import pdb
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
     cfg_mse = cfg_blockavg['cfg_mse']
+    cfg_GLM = cfg_blockavg['cfg_GLM']
     
     mse_val_for_bad_data = cfg_mse['mse_val_for_bad_data']
     mse_amp_thresh = cfg_mse['mse_amp_thresh']
@@ -43,31 +44,40 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
             # do the block average on the data in rec[subj_idx][file_idx][rec_str]
             # rec_str could be 'conc_tddr', 'conc_tddr_ica' or 'od' or even conc_splineSG
+            
             conc_filt = rec[subj_idx][file_idx][rec_str].copy()
+            
+            # select the stim for the given file
+            stim = rec[subj_idx][file_idx].stim.copy()
+            
+            # !!! ADD if conc and flag_do_GLM then run glm func
+            #pdb.set_trace()
+            if 'chromo' in conc_filt.dims and cfg_blockavg['flag_do_GLM_filter']:
+                rec_glm = GLM(rec[subj_idx][file_idx], rec_str, cfg_blockavg['trange_hrf'][0], cfg_blockavg['trange_hrf'][1], cfg_GLM)
+                conc_filt = rec_glm[rec_str]
+                
+            # else no GLM filtering:
+            else:
+                
+                # get the epochs
+                # check if conc_filt has dimenstion chromo
+                if 'chromo' in conc_filt.dims:
+                    conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
+                else:
+                    conc_filt = conc_filt.transpose('wavelength', 'channel', 'time')
+                conc_filt = conc_filt.assign_coords(samples=('time', np.arange(len(conc_filt.time))))
+                conc_filt['time'] = conc_filt.time.pint.quantify(units.s)     
 
             #
             # block average
             #
-
-            # select the stim for the given file
-            stim = rec[subj_idx][file_idx].stim.copy()
-
-            # get the epochs
-            # check if conc_filt has dimenstion chromo
-            if 'chromo' in conc_filt.dims:
-                conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
-            else:
-                conc_filt = conc_filt.transpose('wavelength', 'channel', 'time')
-            conc_filt = conc_filt.assign_coords(samples=('time', np.arange(len(conc_filt.time))))
-            conc_filt['time'] = conc_filt.time.pint.quantify(units.s)     
-
             conc_epochs_tmp = conc_filt.cd.to_epochs(
                                         stim,  # stimulus dataframe
                                         set(stim[stim.trial_type.isin(cfg_blockavg['stim_lst_hrf'])].trial_type), # select events
                                         before=cfg_blockavg['trange_hrf'][0],  # seconds before stimulus
                                         after=cfg_blockavg['trange_hrf'][1],  # seconds after stimulus
                                     )
-                
+            
             # concatenate the different epochs from each file for each subject
             if cfg_blockavg['flag_save_each_subj']:
                 conc_epochs_tmp = conc_epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in conc_epochs_tmp.trial_type.values]))
@@ -447,6 +457,56 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
 
 
+def GLM(rec, rec_str, t_pre, t_post, cfg_GLM):
+    
+    #### build design matrix
+    ts_long, ts_short = cedalion.nirs.split_long_short_channels(
+        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']
+    )
+    
+    # build regressors
+    dm, channel_wise_regressors = glm.make_design_matrix(
+        rec[rec_str],
+        #ts_long,
+        ts_short,
+        rec.stim,
+        rec.geo3d,
+        basis_function = glm.GaussianKernels(t_pre, t_post, cfg_GLM['t_delta'], cfg_GLM['t_std']),
+        drift_order = cfg_GLM['drift_order'],
+        short_channel_method = cfg_GLM['short_channel_method']
+    )
+    
+    #### fit the model 
+    betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
+    
+    pred_all = glm.predict(rec[rec_str], betas, dm, channel_wise_regressors)
+    pred_all = pred_all.pint.quantify('micromolar')
+    
+    residual = rec[rec_str] - pred_all
+    
+    # prediction of all HRF regressors, i.e. all regressors that start with 'HRF '
+    pred_hrf = glm.predict(
+                            rec[rec_str],
+                            betas.sel(regressor=betas.regressor.str.startswith("HRF ")),
+                            dm,
+                            channel_wise_regressors
+                        )
+    
+    pred_hrf = pred_hrf.pint.quantify('micromolar')
+
+    rec['pred_hrf'] = pred_hrf + residual 
+    
+    #### get average HRF prediction 
+    rec['pred_hrf'] = rec['pred_hrf'].transpose('chromo', 'channel', 'time')
+    rec['pred_hrf'] = rec['pred_hrf'].assign_coords(samples=("time", np.arange(len(rec['pred_hrf'].time))))
+    rec['pred_hrf']['time'] = rec['pred_hrf'].time.pint.quantify(units.s) 
+    
+
+    return rec
+
+#%% Old funcs
+
+
 def block_average_od( od_filt, stim, geo3d, cfg_blockavg ):
 
     # get the epochs
@@ -628,3 +688,5 @@ def GLM_extract_estimated_hrf( conc_filt, geo3d, stim, glm_basis_func_param, bet
     pred_hrf = pred_hrf.assign_coords(detector=('channel',blockaverage['detector'].data))
 
     return pred_hrf
+
+
