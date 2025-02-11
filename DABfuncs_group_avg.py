@@ -20,7 +20,12 @@ import pdb
 
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
-    cfg_mse = cfg_blockavg['cfg_mse']
+    # choose correct mse values 
+    if 'chromo' in rec[0][0][rec_str]:
+        cfg_mse = cfg_blockavg['cfg_mse_conc']
+    else:
+        cfg_mse = cfg_blockavg['cfg_mse_od']
+        
     cfg_GLM = cfg_blockavg['cfg_GLM']
     
     mse_val_for_bad_data = cfg_mse['mse_val_for_bad_data']
@@ -209,7 +214,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             mse_t = mse_t.assign_coords(source=('channel',source_coord.data))
             detector_coord = blockaverage['detector']
             mse_t = mse_t.assign_coords(detector=('channel',detector_coord.data))
-    
+            
             mse_t_o = mse_t.copy()
             mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t)
             

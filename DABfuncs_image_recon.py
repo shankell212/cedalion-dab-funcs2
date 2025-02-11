@@ -31,8 +31,11 @@ import spatial_basis_funs_ced as sbf
 def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
 
     # Load the sensitivity profile
-    with open(os.path.join(path_to_dataset, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
-        Adot = pickle.load(f)
+    # with open(os.path.join(path_to_dataset, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
+    #     Adot = pickle.load(f)
+    
+    with open(path_to_dataset + head_model + '/Adot_wParcels.pkl', 'rb') as f:
+        Adot = pickle.load(f) 
         
     #% LOAD HEAD MODEL 
     if head_model == 'ICBM152':
@@ -135,7 +138,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
     if SB:
         M = sbf.get_sensitivity_mask(Adot_pruned, sb_cfg['mask_threshold'])
 
-        G = sbf.get_G_matrix(head, 
+        G = sbf.get_G_matrix(head,     # spatial basis functions
                                 M,
                                 sb_cfg['threshold_brain'], 
                                 sb_cfg['threshold_scalp'], 
@@ -162,7 +165,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
         H[:,:nkernels_brain] = A_hbo_brain.values @ G['G_brain'].values.T
         H[:, nkernels_brain+nkernels_scalp:2*nkernels_brain+nkernels_scalp] = A_hbr_brain.values @ G['G_brain'].values.T
         
-        H[:,nkernels_brain:nkernels_brain+nkernels_scalp] = A_hbo_scalp.values @ G['G_scalp'].values.T
+        H[:,nkernels_brain:nkernels_brain+nkernels_scalp] = A_hbo_scalp.values @ G['G_scalp'].values.T   # H projects the sensitivity matrix into the spatial basis space
         H[:,2*nkernels_brain+nkernels_scalp:] = A_hbr_scalp.values @ G['G_scalp'].values.T
 
         H = xr.DataArray(H, dims=("channel", "kernel"))
