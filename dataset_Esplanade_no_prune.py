@@ -30,6 +30,7 @@ import DABfuncs_plot_DQR as pfDAB_dqr
 import DABfuncs_group_avg as pfDAB_grp_avg
 import DABfuncs_ERBM_ICA as pfDAB_ERBM
 import DABfuncs_image_recon as pfDAB_img
+import spatial_basis_funs_ced as sbf 
 
 
 # Turn off all warnings
@@ -548,10 +549,9 @@ file.close()
 
 
 # %%
-Adot_brain = Adot.copy()
-Adot_brain.data = Adot_brain.data[:,0:head.nV]
-
-
+threshold = -2 # log10 absolute
+wl_idx = 1
+M = sbf.get_sensitivity_mask(Adot, threshold, wl_idx)
 
 
 # %% Plot the images
@@ -559,18 +559,60 @@ Adot_brain.data = Adot_brain.data[:,0:head.nV]
 import importlib
 importlib.reload(pfDAB_img)
 
-#foo_img = X_hrf_mag_mean_weighted
-foo_img = X_tstat
+flag_hbo = True
+flag_brain = True
+flag_img = 'noise' # 'tstat', 'mag', 'noise'
+flag_condition = 'STS' # 'ST', 'DT', 'STS'
 
-#title_str = 'HbO'
-title_str = 'HbO t-stat'
 
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), 'hbo_brain', 'scale_bar', None, title_str)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), 'hbo_brain', 'left', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), 'hbo_brain', 'superior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), 'hbo_brain', 'right', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), 'hbo_brain', 'anterior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), 'hbo_brain', 'posterior', p0)
+if flag_hbo:
+    title_str = 'HbO'
+    hbx_brain_scalp = 'hbo'
+else:
+    title_str = 'HbR'
+    hbx_brain_scalp = 'hbr'
+
+if flag_brain:
+    title_str = title_str + ' brain'
+    hbx_brain_scalp = hbx_brain_scalp + '_brain'
+else:
+    title_str = title_str + ' scalp'
+    hbx_brain_scalp = hbx_brain_scalp + '_scalp'
+
+if flag_img == 'tstat':
+    foo_img = X_tstat.copy()
+    title_str = title_str + ' t-stat'
+elif flag_img == 'mag':
+    foo_img = X_hrf_mag_mean_weighted.copy()
+    title_str = title_str + ' magnitude'
+elif flag_img == 'noise':
+    foo_img = X_stderr_weighted.copy()
+    title_str = title_str + ' noise'
+#    foo_img.values = np.log10(foo_img.values)+7
+
+
+# title_str = 'HbR'
+# hbx_brain_scalp = 'hbr_brain'
+# foo_img = X_hrf_mag_mean_weighted
+
+# title_str = 'HbR t-stat'
+# hbx_brain_scalp = 'hbr_brain'
+# foo_img = X_tstat
+
+
+
+
+foo_img[~M] = np.nan
+# foo_img = xr.where(np.abs(foo_img) < 1.86, np.nan, foo_img) # one-tail is 1.86 and two tail is 2.3
+
+
+
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), hbx_brain_scalp, 'scale_bar', None, title_str)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), hbx_brain_scalp, 'left', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), hbx_brain_scalp, 'superior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), hbx_brain_scalp, 'right', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), hbx_brain_scalp, 'anterior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), hbx_brain_scalp, 'posterior', p0)
 
 p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', f'IMG.png') )
 p0.close()
@@ -594,7 +636,28 @@ p0 = pfDAB_img.plot_image_recon(X_foo, head, 'hbo_brain', 'left')
 
 
 
+# %% MNI coordinates
+head_ras = head.apply_transform(head.t_ijk2ras)
 
+# brain indices
+idx_brain = np.where(Adot.is_brain)[0]
+
+# make an xarray associating parcels with MNI coordinates
+parcels_mni_xr = xr.DataArray(
+    head_ras.brain.mesh.vertices[idx_brain,:],
+    dims = ('vertex', 'coord'),
+    coords = {'parcel': ('vertex', Adot.coords['parcel'].values[idx_brain])},
+)
+
+# get MNI coordinates of a specific parcel 'VisCent_ExStr_11_LH'
+parcel_specific = parcels_mni_xr.where(parcels_mni_xr['parcel'] == 'VisCent_ExStr_11_LH', drop=True)
+
+# find the parcel closest to a specific MNI coordinate
+mni_coord = np.array([[ -27.1, -100.1 ,    9.4]])
+dist = np.linalg.norm(parcels_mni_xr.values - mni_coord, axis=1)
+parcel_closest = parcels_mni_xr[np.argmin(dist)]
+print(f'Parcel closest to {mni_coord} is {parcel_closest["parcel"].values} with MNI coordinates {parcel_closest.values}')
+print(f'Distance is {np.min(dist):0.2f} mm')
 
 # %% Parcels
 ##############################################################################
