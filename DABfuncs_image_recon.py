@@ -382,25 +382,29 @@ def plot_image_recon( X, head, shape, iax, flag_hbx='hbo_brain', view_position='
     if flag_hbx == 'hbo_brain': # hbo brain 
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)
-        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
+        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_brain': # hbr brain
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)   
-        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
+        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbo_scalp': # hbo scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
+        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_scalp': # hbr scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar )
+        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     if iax[0] == 1 and iax[1] == 1:
@@ -416,3 +420,4 @@ def plot_image_recon( X, head, shape, iax, flag_hbx='hbo_brain', view_position='
     # p0.close()
 
     return p0
+
