@@ -37,7 +37,7 @@ import DABfuncs_image_recon as pfDAB_img
 import warnings
 warnings.filterwarnings('ignore')
 
-
+import pyvista as pv
 # %% 
 ##############################################################################
 import importlib
@@ -60,8 +60,10 @@ cfg_dataset = {
     #'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
     'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
     'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    #'subj_ids' : ['01'],
     'file_ids' : ['IWHD_run-01'],
     'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
+    
     #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
 }
 
@@ -74,6 +76,7 @@ cfg_dataset['filenm_lst'] = [
 
 cfg_dqr = {
     'stim_lst_dqr' : ['ST', 'DT'] # FIXME: why have multiple of this
+    #'stim_lst_dqr' : ['STS']
 }
 
 cfg_prune = {
@@ -131,7 +134,7 @@ cfg_mse_od = {
     'mse_val_for_bad_data' : 1e1, 
     'mse_amp_thresh' : 1.1e-6,
     'mse_min_thresh' : 1e-6,
-    'blockaverage_val' : 0 
+    'blockaverage_val' : 0      # blockaverage val for bad data?
     }
 
 
@@ -160,50 +163,12 @@ cfg_blockavg = {
 
 cfg_erbmICA = {}
 
-#%%
-# for idc, subj in enumerate(cfg_dataset['subj_ids']):
-#     file_id = cfg_dataset['filenm_lst'][idc][0]
-#     file_id = file_id[0:-4]
-#     path2events = cfg_dataset['root_dir'] + 'sub-' + subj + '/nirs/' + file_id + 'events.tsv'
-    
-#     if not os.path.exists( path2events ):
-#         print( f"Error: File {path2events} does not exist" )
-#     else:
-#         stim_df = pd.read_csv( path2events, sep='\t' )
-    
-#     stim_df.rename(columns={'amplitude': 'value'}, inplace=True)
-#     #stim_df = stim_df.replace('ST', 'STS')
-    
-    
-#     #stim_df.to_csv(path2events, sep='\t', index=False)
-
+                    
 
 
 # %% Load and preprocess the data
 ##############################################################################
 
-# Load and preprocess the data
-#
-# This function will load all the data for the specified subject and file IDs, and preprocess the data.
-# This function will also create several data quality report (DQR) figures that are saved in /derivatives/plots.
-# The function will return the preprocessed data and a list of the filenames that were loaded, both as 
-# two dimensional lists [subj_idx][file_idx].
-# The data is returned as a recording container with the following fields:
-#   timeseries - the data matrices with dimensions of ('channel', 'wavelength', 'time') 
-#      or ('channel', 'HbO/HbR', 'time') depending on the data type. 
-#      The following sub-fields are included:
-#         'amp' - the original amplitude data slightly processed to remove negative and NaN values and to 
-#            apply a 3 point median filter to remove outliers.
-#         'amp_pruned' - the 'amp' data pruned according to the SNR, SD, and amplitude thresholds.
-#         'od' - the optical density data
-#         'od_tddr' - the optical density data after TDDR motion correction is applied
-#         'conc_tddr' - the concentration data obtained from 'od_tddr'
-#         'od_splineSG' and 'conc_splineSG' - returned if splineSG motion correction is applied (i.e. flag_do_splineSG=True)
-#   stim - the stimulus data with 'onset', 'duration', and 'trial_type' fields and more from the events.tsv files.
-#   aux_ts - the auxiliary time series data from the SNIRF files.
-#      In addition, the following aux sub-fields are added during pre-processing:
-#         'gvtd' - the global variance of the time derivative of the 'od' data.
-#         'gvtd_tddr' - the global variance of the time derivative of the 'od_tddr' data.
 
 # determine the number of subjects and files. Often used in loops.
 n_subjects = len(cfg_dataset['subj_ids'])
@@ -227,34 +192,61 @@ for subj_id in cfg_dataset['subj_ids']:
 import importlib
 importlib.reload(pfDAB)
 
+
 # RUN PREPROCESSING
 if not flag_load_preprocessed_data:
     print("Running load and process function")
     rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
     
+    
     # SAVE preprocessed data 
     if flag_save_preprocessed_data:
     
-        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'chs_pruned_subjs_ts.pkl'), 'wb') as f:
-            pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL
-            )
+        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+                                     'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
+            pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
             
-        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'rec_list_ts.pkl'), 'wb') as f:
-            pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL
-            )
+        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+                                     'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'wb') as f:
+            pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
+            
+            
+        # SAVE cfg params to txt file
+        dict_cfg_save = {"cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + '.txt'
+
+        with open(rootDir_saveData + cfg_save_str, "w", encoding="utf-8") as f:
+                def write_dict(d, level=0):
+                    for key, value in d.items():
+                        f.write("  " * level + f"{key}: ")
+                        if isinstance(value, dict):  # If the value is a sub-dictionary, recurse
+                            f.write("\n")
+                            write_dict(value, level + 1)
+                        else:
+                            f.write(f"{value}\n")
+                            
+                for var_name, dict_data in dict_cfg_save.items():
+                        f.write(f"=== {var_name} ===\n")  # Writing the dictionary name
+                        if isinstance(dict_data, dict):
+                            write_dict(dict_data)
+                        else:
+                            f.write(str(dict_data) + "\n")  # If it's not a dict, just write its value
+                        f.write("\n")  # Separate different dictionaries
+        
         
 # LOAD in saved data
 else:
     print("Loading saved data")
-    with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts_IWHD.pkl'), 'rb') as f:
+    with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
          rec = pickle.load(f)
-    with gzip.open( os.path.join(rootDir_saveData, 'chs_pruned_subjs_ts_IWHD.pkl'), 'rb') as f:
+    with gzip.open( os.path.join(rootDir_saveData, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f:
          chs_pruned_subjs = pickle.load(f)
 
 
 
 # %% ERBM ICA Filtering 
 ##############################################################################
+'''
 import importlib
 importlib.reload(pfDAB_ERBM)
 
@@ -289,10 +281,11 @@ flag_ERBM_vs_EBM = False # if True, use ERBM, otherwise use EBM
 
 # FIXME: I want to verify that this properly scales back the NOT pruned data to channel space
 rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_do_pca_filter, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica )
+'''
 
 
-
-
+# FIXME: should not be needed here... shouldbe handled in ICA step above
+ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
 
 # %% Block Average - unweighted and weighted
@@ -302,31 +295,24 @@ import importlib
 importlib.reload(pfDAB_grp_avg)
 
 
-# FIXME: should not be needed here... shouldbe handled in ICA step above
-ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
-# import pdb
-# pdb.set_trace()
-if 0:
+flag_blockavg_conc = False
+
+# rec_str_lst = ['conc_tddr', '_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
+
+rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
+flag_save_weighted = [False, True, False, True]
+
+
+if flag_blockavg_conc:
+    save_str = 'CONC'
+    
     rec_str = 'conc_tddr'
     y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
     blockaverage_mean = y_mean
 
-    # rec_str = 'conc_tddr_pca'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    # rec_str = 'conc_tddr_ica'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-    # rec_str = 'conc_tddr_glm'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-if 1:  # !!! sub 3 has no od_imu --- go back and check preprocess for this sub?????????
+else:
+    save_str = 'OD'
     # rec_str = 'conc_o_tddr' # just doing this because I want the DQR scalp plot for this
     # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
 
@@ -339,25 +325,16 @@ if 1:  # !!! sub 3 has no od_imu --- go back and check preprocess for this sub??
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
     
-    # rec_str = 'od_imu_tddr'
-    # y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-imu' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    rec_str = 'od_imu_tddr'
+    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-imu' for x in y_mean.trial_type.values])
+    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
     
-    # rec_str = 'od_o_imu_tddr'
-    # y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o-imu' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    rec_str = 'od_o_imu_tddr'
+    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o-imu' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-    # # rec_str = 'od_o_tddr_pca'
-    # # y_mean, y_mean_weighted_pca, y_stderr_weighted_pca, _, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # # blockaverage_mean_tmp = y_mean_weighted_pca.assign_coords(trial_type=[x + '-o-pca' for x in y_mean_weighted.trial_type.values])
-    # # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-    # # rec_str = 'od_o_tddr_ica'
-    # # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, _, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # # blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
-    # # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 # save the results to a pickle file
 blockaverage = blockaverage_mean
@@ -368,7 +345,7 @@ if cfg_blockavg['flag_save_each_subj']:
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
 
 if cfg_blockavg['flag_save_group_avg_hrf']:
-    file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage_IWHD_OD.pkl.gz')
+    file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz')
     file = gzip.GzipFile(file_path_pkl, 'wb')
     
     if 'chromo' in blockaverage.dims:
@@ -397,6 +374,19 @@ if cfg_blockavg['flag_save_group_avg_hrf']:
     print('Saved group average HRF to ' + file_path_pkl)
 
 
+#%% Load saved block average data
+# save_str = 'OD'
+# filenm_bl = 'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz'
+# filepath_bl = rootDir_saveData + filenm_bl
+
+# if os.path.exists(filepath_bl):
+#     with gzip.open(filepath_bl, 'rb') as f:
+#         blockaverage, geo2d, geo3d = pickle.load(f)
+#     print("Saved blockaverage file loaded successfully!")
+# else:
+#     print(f"Error: File '{filepath_bl}' not found!")
+
+
 
 # %% Load the Sensitivity Matrix and Head Model
 ##############################################################################
@@ -418,11 +408,11 @@ import importlib
 importlib.reload(pfDAB_img)
 
 
-trial_type_img = 'DT' #'STS-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
+trial_type_img = 'DT-o-imu' #'STS-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
 t_win = (10, 20)
 
 file_save = True
-flag_Cmeas = True # if True make sure you are using the correct y_stderr_weighted below -- covariance
+flag_Cmeas = False # if True make sure you are using the correct y_stderr_weighted below -- covariance
 
 BRAIN_ONLY = False
 SB = False  # spatial basis
@@ -477,6 +467,20 @@ else:
 print('Done with Image Reconstruction')
 
 
+
+# W = pseudo inverse ?
+
+#%% Load in saved Image Recon 
+
+# filenm_img_results = "X_ST-o-imu_cov_alpha_spatial_1e-01_alpha_meas_1e+00.pkl.gz" # !!! check function for what's saved in file
+
+# # Open and load the pickle file
+# with gzip.open(rootDir_saveData + filenm_img_results, 'rb') as f:
+#     data = pickle.load(f)
+
+# # Print or inspect the data
+# print(type(data))  # Check the type of the loaded data
+# print(data)  # Print a sample of the data
 
 
 # %% Calculate the image noise and image CNR
@@ -553,7 +557,7 @@ D = None
 for idx_subj in range(n_subjects):
 
 # !!!vstart trial type loop
-    hrf_od_mag = y_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+    hrf_od_mag = y_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # !!! y_subj not saved for each trial type/ condition --- FIX
     # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
     # get the image
@@ -656,24 +660,39 @@ Adot_brain.data = Adot_brain.data[:,0:head.nV]
 import importlib
 importlib.reload(pfDAB_img)
 
+import pyvista as pv
+
 #foo_img = X_hrf_mag_mean_weighted
-foo_img = X_tstat
+# foo_img = X_tstat
 
-#title_str = 'HbO'
-title_str = 'HbO t-stat'
+foo_img = X_grp
+Group = True   # if image recon done on group average of chan space results
+flag_hbx = 'hbo_brain'
 
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), 'hbo_brain', 'scale_bar', None, title_str)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), 'hbo_brain', 'left', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), 'hbo_brain', 'superior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), 'hbo_brain', 'right', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), 'hbo_brain', 'anterior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), 'hbo_brain', 'posterior', p0)
+if Group:
+    title_str = trial_type_img + '_' + flag_hbx + '_group'
+else:
+    title_str = trial_type_img + '_' + flag_hbx + '_group'
 
-p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', f'IMG.png') )
+# p0 = pv.Plotter(off_screen=True)
+
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), flag_hbx, 'scale_bar', None, title_str)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), flag_hbx, 'left', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), flag_hbx, 'superior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), flag_hbx, 'right', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), flag_hbx, 'anterior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), flag_hbx, 'posterior', p0)
+
+#p0.show()  # This renders the scene
+# p0.set_off_screen(True)  # enable off-screen rendering before plotting
+
+p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', f'{title_str}_IMG.png') )
 p0.close()
 
 
 # %%
+
+'''
 X_foo = X_tstat.copy()
 X_foo[:,0] = 0
 
@@ -766,15 +785,5 @@ p.show()
 
 p0 = pfDAB_img.plot_image_recon(X_foo, head, 'hbo_brain', 'left')
 
-
-
-
-
-
-
-
-
-# %% Old Code
-##############################################################################
-##############################################################################
+'''
 

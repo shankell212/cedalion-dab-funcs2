@@ -87,9 +87,16 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
         else:
             Adot_pruned = Adot[pruning_mask.values, :, :]
             
-        od_mag_pruned = hrf_od[:,pruning_mask.values,:].stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
+        # !!! fixed the assumtion that hrf_od was always a time a series.... is this ok tho
+        if len(hrf_od.dims) == 2: # if nto a time series
+            od_mag_pruned = hrf_od[:,pruning_mask.values].stack(measurement=('channel', 'wavelength')).sortby('wavelength')
+        else:   # it is a time series
+            od_mag_pruned = hrf_od[:,pruning_mask.values,:].stack(measurement=('channel', 'wavelength')).sortby('wavelength')   
+        
+        
         # od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
         # od_mag_pruned = od_mag.dropna('measurement')
+        
     else: # don't prune anything if C_meas is not None as we use C_meas to essentially prune
           # but we make sure the corresponding elements of C_meas are set to BAD values
         if BRAIN_ONLY:
@@ -375,7 +382,7 @@ def plot_image_recon( X, head, shape, iax, flag_hbx='hbo_brain', view_position='
     pos = positions[idx[0]]
 
     if p0 is None:
-        p0 = pv.Plotter(shape=(shape[0],shape[1]), window_size = [2000, 1500])
+        p0 = pv.Plotter(off_screen=True, shape=(shape[0],shape[1]), window_size = [2000, 1500])
 #        p.add_text(f"Group average with alpha_meas = {alpha_meas} and alpha_spatial = {alpha_spatial}", position='upper_left', font_size=12, viewport=True)
 
     p0.subplot(iax[0], iax[1])
