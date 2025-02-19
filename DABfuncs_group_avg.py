@@ -22,7 +22,7 @@ import pdb
 
 
 
-def get_group_average_for_different_conds(rec, rec_str_lst, flag_save_weighted, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
+def get_group_avg_for_diff_conds(rec, rec_str_lst, flag_save_weighted, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     '''
     This function takes in a list of strings (trial_types/ conditions)
     and loops through each rec_str and blockaverages each.
@@ -34,6 +34,13 @@ def get_group_average_for_different_conds(rec, rec_str_lst, flag_save_weighted, 
             whether to save the weighted or unweighted for each data array in rec_str_lst
     '''
     
+    if not rec_str_lst:
+        print('No list of recording objects given. Cannot compute block average.')
+        return None, None, None, None
+    if any('od' in rec_str for rec_str in rec_str_lst) & any('conc' in rec_str for rec_str in rec_str_lst):
+        print('rec_str_lst includes both conc and od. Cannot compute blockaverage.')
+    
+
     for idx,rec_str in enumerate(rec_str_lst):
         
         # Change trial type name to match rec_str (for concatination purposes)
@@ -45,25 +52,33 @@ def get_group_average_for_different_conds(rec, rec_str_lst, flag_save_weighted, 
         # Run block average func
         y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
         
-        
         # Save weighted or unweighted
         if flag_save_weighted[idx]:
             blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + new_name for x in y_mean_weighted.trial_type.values])
-            blockaverage_stderr_tmp = y_stderr_weighted.assign_coords(trial_type=[x + new_name for x in y_stderr_weighted.trial_type.values]) # also save stderr weighted
         else:
             blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + new_name for x in y_mean.trial_type.values])
+            
+        # save other stuff
+        blockaverage_stderr_tmp = y_stderr_weighted.assign_coords(trial_type=[x + new_name for x in y_stderr_weighted.trial_type.values]) # also save stderr weighted
+        blockaverage_subj_tmp = y_subj.assign_coords(trial_type=[x + new_name for x in y_subj.trial_type.values])
+        blockaverage_mse_subj_tmp = y_mse_subj.assign_coords(trial_type=[x + new_name for x in y_mse_subj.trial_type.values])
         
-        # !!! Save ysub_mse and y_sub  
         
         # If first loop, then initiate blockaverage var
         if idx == 0:
             blockaverage_mean = blockaverage_mean_tmp
+            blockaverage_subj = blockaverage_subj_tmp
+            blockaverage_mse_subj = blockaverage_mse_subj_tmp
             blockaverage_stderr = blockaverage_stderr_tmp
+                
         else:
             blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-            blockaverage_stderr = xr.concat([blockaverage_stderr, blockaverage_stderr_tmp],dim='trial_type')
-        
-    return blockaverage_mean, blockaverage_stderr
+            blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp],dim='trial_type')
+            blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp],dim='trial_type')
+            blockaverage_stderr = xr.concat([blockaverage_stderr, blockaverage_stderr_tmp], dim='trial_type')
+            
+            
+    return blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj
         
 
 
