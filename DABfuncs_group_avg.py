@@ -18,6 +18,72 @@ import matplotlib.pyplot as p
 
 import pdb
 
+
+
+
+
+def get_group_avg_for_diff_conds(rec, rec_str_lst, flag_save_weighted, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
+    '''
+    This function takes in a list of strings (trial_types/ conditions)
+    and loops through each rec_str and blockaverages each.
+    
+    Inputs: 
+        rec : list of recording objects for each subject
+        rec_str_lst : list strings identifying data arrays in rec you want to average
+        flag_save_weighted : list (same size as rec_str_lst) that indicates 
+            whether to save the weighted or unweighted for each data array in rec_str_lst
+    '''
+    
+    if not rec_str_lst:
+        print('No list of recording objects given. Cannot compute block average.')
+        return None, None, None, None
+    if any('od' in rec_str for rec_str in rec_str_lst) & any('conc' in rec_str for rec_str in rec_str_lst):
+        print('rec_str_lst includes both conc and od. Cannot compute blockaverage.')
+    
+
+    for idx,rec_str in enumerate(rec_str_lst):
+        
+        # Change trial type name to match rec_str (for concatination purposes)
+        if 'conc' in rec_str:   
+            new_name = rec_str[4:]
+        else: 
+            new_name = rec_str[2:]
+            
+        # Run block average func
+        y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
+        
+        # Save weighted or unweighted
+        if flag_save_weighted[idx]:
+            blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + new_name for x in y_mean_weighted.trial_type.values])
+        else:
+            blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + new_name for x in y_mean.trial_type.values])
+            
+        # save other stuff
+        blockaverage_stderr_tmp = y_stderr_weighted.assign_coords(trial_type=[x + new_name for x in y_stderr_weighted.trial_type.values]) # also save stderr weighted
+        blockaverage_subj_tmp = y_subj.assign_coords(trial_type=[x + new_name for x in y_subj.trial_type.values])
+        blockaverage_mse_subj_tmp = y_mse_subj.assign_coords(trial_type=[x + new_name for x in y_mse_subj.trial_type.values])
+        
+        
+        # If first loop, then initiate blockaverage var
+        if idx == 0:
+            blockaverage_mean = blockaverage_mean_tmp
+            blockaverage_subj = blockaverage_subj_tmp
+            blockaverage_mse_subj = blockaverage_mse_subj_tmp
+            blockaverage_stderr = blockaverage_stderr_tmp
+                
+        else:
+            blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+            blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp],dim='trial_type')
+            blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp],dim='trial_type')
+            blockaverage_stderr = xr.concat([blockaverage_stderr, blockaverage_stderr_tmp], dim='trial_type')
+            
+            
+    return blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj
+        
+
+
+
+
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
     # choose correct mse values 
@@ -50,13 +116,17 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             # do the block average on the data in rec[subj_idx][file_idx][rec_str]
             # rec_str could be 'conc_tddr', 'conc_tddr_ica' or 'od' or even conc_splineSG
             
-            conc_filt = rec[subj_idx][file_idx][rec_str].copy()
+            # Check if rec_str exists for current subject
+            if rec_str not in rec[subj_idx][file_idx].timeseries:
+                continue  # if rec_str does not exist, skip 
+            else:
+                conc_filt = rec[subj_idx][file_idx][rec_str].copy()
             
             # select the stim for the given file
             stim = rec[subj_idx][file_idx].stim.copy()
             
             # !!! ADD if conc and flag_do_GLM then run glm func
-            #pdb.set_trace()
+
             if 'chromo' in conc_filt.dims and cfg_blockavg['flag_do_GLM_filter']:
                 rec_glm = GLM(rec[subj_idx][file_idx], rec_str, cfg_blockavg['trange_hrf'][0], cfg_blockavg['trange_hrf'][1], cfg_GLM)
                 conc_filt = rec_glm[rec_str]
@@ -125,9 +195,6 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
                 foo_t = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
             foo_t = foo_t.transpose('measurement', 'reltime', 'epoch')
             mse_t = (foo_t**2).sum('epoch') / (n_epochs - 1)**2 # this is squared to get variance of the mean, aka MSE of the mean
-            # remove the units from mse_t
-            # mse_t = mse_t.pint.dequantify()
-    
     
             # list of channel elements in mse corresponding to channels with amp < mse_amp_thresh
             amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
@@ -138,44 +205,24 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             # blockaverage_weighted[0,0,idx_amp,:] = blockaverage_val # FIXME: first dimension is trial_type
             # blockaverage_weighted[0,1,idx_amp,:] = blockaverage_val 
             
-            # Check if block averaging on OD or Conc
-            if 'chromo' in conc_filt.dims:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbO'), 
-                                             idx_amp, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbR'), 
-                                             idx_amp, :] = blockaverage_val
-            else:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[0]), 
-                                             idx_amp, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[1]), 
-                                             idx_amp, :] = blockaverage_val
+            # Update bad data with predetermined value
+            bad_vals = blockaverage_weighted.isel(channel=idx_amp)
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
             
             #%%
             # look at saturated channels
-            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
+            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0] 
             mse_t[idx_sat,:] = mse_val_for_bad_data
             mse_t[idx_sat + n_chs,:] = mse_val_for_bad_data
             # blockaverage_weighted[0,0,idx_sat,:] = blockaverage_val # FIXME: first dimension is trial_type
             # blockaverage_weighted[0,1,idx_sat,:] = blockaverage_val 
-            if 'chromo' in conc_filt.dims:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbO'), 
-                                             idx_sat, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbR'), 
-                                             idx_sat, :] = blockaverage_val
-            else:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[0]), 
-                                             idx_sat, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[1]), 
-                                             idx_sat, :] = blockaverage_val
+            
+            bad_vals = blockaverage_weighted.isel(channel=idx_sat)
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel= bad_vals.channel.data)] = blockaverage_val
+            
     
+            
+            #%%
             # where mse_t is 0, set it to mse_val_for_bad_data
             # I am trying to handle those rare cases where the mse is 0 for some subjects and then it corrupts 1/mse
             # FIXME: why does this happen sometimes?
@@ -186,21 +233,12 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             #blockaverage_weighted[0,0,idx_bad1,:] = blockaverage_val
             #blockaverage_weighted[0,1,idx_bad2,:] = blockaverage_val
             
-            # Check if block averaging on OD or Conc
-            if 'chromo' in conc_filt.dims:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbO'), 
-                                             idx_bad1, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('chromo').get_loc('HbR'), 
-                                             idx_bad2, :] = blockaverage_val
-            else:
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[0]), 
-                                             idx_bad1, :] = blockaverage_val
-                blockaverage_weighted.values[ blockaverage_weighted.get_index('trial_type').get_loc(trial_type),
-                                             blockaverage_weighted.get_index('wavelength').get_loc(blockaverage_weighted.get_index('wavelength')[1]), 
-                                             idx_bad2, :] = blockaverage_val
+            bad_vals = blockaverage_weighted.isel(channel=idx_bad1)
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
+            bad_vals = blockaverage_weighted.isel(channel=idx_bad2)
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
+            
+            
 
             # FIXME: do I set blockaverage_weighted too?
     
@@ -216,7 +254,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             mse_t = mse_t.assign_coords(detector=('channel',detector_coord.data))
             
             mse_t_o = mse_t.copy()
-            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t)
+            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
             
             mse_t = mse_t.assign_coords(trial_type = [trial_type]) # assign coords to match curr trial type
             mse_t_o = mse_t_o.assign_coords(trial_type = [trial_type]) 
@@ -261,7 +299,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
             blockaverage_mean_weighted += blockaverage_weighted / mse_t
 
-            blockaverage_mse_inv_mean_weighted = blockaverage_mse_inv_mean_weighted + 1 / mse_t
+            blockaverage_mse_inv_mean_weighted = blockaverage_mse_inv_mean_weighted + 1 / mse_t # !!! is this supposed to be  += ???
 
         else:
             print(f"   Subject {subj_ids[subj_idx]} excluded from group average")
