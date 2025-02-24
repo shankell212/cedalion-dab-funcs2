@@ -21,6 +21,9 @@ from sklearn.decomposition import PCA
 from cedalion.sigdecomp.ERBM import ERBM
 from scipy import stats
 
+from scipy.signal import filtfilt
+from scipy.signal.windows import gaussian
+
 
 
 def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
@@ -772,3 +775,85 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
     if flag_plot:
         p.show()
 
+
+
+def plot_gradCPT_VTC( stim, filepath, filenm ):
+
+    RT = np.zeros((stim.shape[0], 4))
+    RT[:,0] = np.array([stim.reaction_time.values])
+    t = stim.onset.values
+
+    lst_commision_error = np.where( stim.response_code == -2 )[0]
+    lst_omision_error = np.where( stim.response_code == -1 )[0]
+
+    meanRT = np.nanmean(RT[:, 0])
+    stdRT = np.nanstd(RT[:, 0], ddof=1)
+
+    # Interpolate to fill NaNs (or replace with the mean RT)
+    RT[:, 1] = np.where(np.isnan(RT[:, 0]), meanRT, RT[:, 0])
+
+    RT[:, 2] = (RT[:, 1] - meanRT) / stdRT
+    RT[:, 3] = np.abs(RT[:, 2])
+
+    # Smooth the VTC and compute the median
+    L = 20
+    W = gaussian(L, std=L/2) / 2  # Creates a Gaussian window with width L
+    VTC_smoothed = filtfilt(W, np.sum(W), RT[:, 3])
+    median_VTC = np.median(VTC_smoothed)
+
+
+    # Plot the RT deviance z-score
+
+    f, ax1 = p.subplots(1, 1, figsize=(12, 7))
+
+    # Plot RT deviance z-score
+    ax1.plot(t, RT[:, 3], color='m', linewidth=0.5)
+    ax1.set_ylabel('RT deviance z-score', fontsize=16, color='k')
+    ax1.tick_params(axis='y', labelcolor='k')
+
+    # # Smooth pupil diameter
+    # pd_smoothed = filtfilt(np.ones(100), 100, np.mean(pd, axis=1))
+
+    # # Create a second y-axis for pupil diameter
+    # ax2 = ax1.twinx()
+    # ax2.plot(t_pd, pd_smoothed, 'c', linewidth=1)
+    # ax2.set_ylabel('Pupil Diameter (mm)', fontsize=16, color='c')
+    # ax2.tick_params(axis='y', labelcolor='c')
+
+    # Highlight VTC smoothed values
+    VTC_smoothed_in = np.full_like(VTC_smoothed, np.nan)
+    VTC_smoothed_out = np.full_like(VTC_smoothed, np.nan)
+    VTC_smoothed_in[VTC_smoothed < median_VTC] = VTC_smoothed[VTC_smoothed < median_VTC]
+    VTC_smoothed_out[VTC_smoothed >= median_VTC] = VTC_smoothed[VTC_smoothed >= median_VTC]
+
+    ax1.plot(t, VTC_smoothed_in, 'r', linewidth=2)
+    ax1.plot(t, VTC_smoothed_out, 'b', linewidth=2)
+
+    # Plot omission and commission errors
+    ax1.plot(t[lst_omision_error], 2 * np.ones(len(lst_omision_error)), 'ko', markersize=10, markeredgecolor='k', markerfacecolor='k')
+    ax1.plot(t[lst_commision_error], 2 * np.ones(len(lst_commision_error)), 'kd', markersize=10, markeredgecolor='k', markerfacecolor=[0.6, 0.6, 0.6])
+
+    # Plot event markers
+    lst_mnt = np.where( stim.trial_type == 'mnt' )[0]
+    for i_stim in lst_mnt:
+        ax1.axvline(x=t[i_stim], color='k')
+
+    ax1.set_xlim([0, t[-1]])
+    # ax2.set_xlim([0, t[-1]])
+
+    # Set legend
+    legend_labels = ['VTC', 'VTC in', 'VTC out','Omission', 'Commission']
+    ax1.legend(legend_labels, loc='upper right')
+    
+    ax1.set_title( f'mean RT = {1e3*meanRT:.0f}ms,  commision {len(lst_commision_error)} / {len(lst_mnt)}' )
+
+    # f.tight_layout()
+    p.xlabel('Time (s)', fontsize=16)
+    # p.show()
+    p.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
+
+    # give a title to the figure
+    p.suptitle(filenm)
+
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gradCPT_VTC.png") )
+    p.close()
