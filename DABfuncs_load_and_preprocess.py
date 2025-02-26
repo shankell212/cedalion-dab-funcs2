@@ -299,6 +299,9 @@ def preprocess(rec, median_filt ):
 
 
 def pruneChannels( rec, cfg_prune ):
+    ''' Function that prunes channels based on cfg params.
+        *Pruned channels are not dropped, instead they are set to NaN 
+        '''
 
     amp_threshs = cfg_prune['amp_threshs']
     snr_thresh = cfg_prune['snr_thresh']
