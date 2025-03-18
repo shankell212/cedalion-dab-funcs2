@@ -166,7 +166,7 @@ cfg_erbmICA = {}
 
 save_path = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
 
-flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
+flag_load_preprocessed_data = False  # if True, will skip load_and_preprocess function and use saved data
 flag_save_preprocessed_data = False   # SAVE or no save
 
 flag_load_blockaveraged_data = False
