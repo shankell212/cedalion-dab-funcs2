@@ -216,7 +216,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             D = Linv**2 @ A.T
         else:
             f = max(np.diag(C))
-        pdb.set_trace()
+#        pdb.set_trace()
         for alpha_meas in cfg_img_recon['alpha_meas_list']:
             
             print(f'   Doing image recon with alpha_meas = {alpha_meas}')

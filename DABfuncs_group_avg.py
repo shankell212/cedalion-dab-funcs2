@@ -87,7 +87,7 @@ def get_group_avg_for_diff_conds(rec, rec_str_lst, flag_save_weighted, chs_prune
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
     # choose correct mse values 
-    if 'chromo' in rec[0][0][rec_str]:
+    if 'chromo' in rec[0][0][rec_str].dims:
         cfg_mse = cfg_blockavg['cfg_mse_conc']
     else:
         cfg_mse = cfg_blockavg['cfg_mse_od']
