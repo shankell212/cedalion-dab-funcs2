@@ -22,7 +22,7 @@ from tkinter import filedialog
 
 import sys
 
-import spatial_basis_funs_ced as sbf 
+import module_spatial_basis_funs_ced as sbf 
 import pdb
 
 

@@ -19,13 +19,13 @@ import json
 
 # import my own functions from a different directory
 import sys
-import DABfuncs_plot_DQR as pfDAB_dqr
-import DABfuncs_imu_glm_filter as pfDAB_imu
+import module_plot_DQR as pfDAB_dqr
+import module_imu_glm_filter as pfDAB_imu
 
 import pdb
 
 
-def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
+def load_and_preprocess( cfg_dataset, cfg_preprocess ):
     '''
     This function will load all the data for the specified subject and file IDs, and preprocess the data.
     This function will also create several data quality report (DQR) figures that are saved in /derivatives/plots.
@@ -77,14 +77,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             
             filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
             
-            # if current sub is in subj_id_exclude, don't process this subject and move on
-            # !!! Added bc one sub doesnt have aux data and errored w/ imu_glm  -- is there a better way to screen for this?
-            # !!! if running IWHD & STS, imu_glm would error with STS .... so instead screen for AUX data before running imu glm??
-                # but STS will still have aux data.... how to handle this? 
-                
-            # if any(sub in filenm for sub in cfg_dataset['subj_id_exclude']):    
-            #     print('Skipping processing for excluded subject')
-            #     continue
 
             print( f"Loading {subj_idx+1} of {n_subjects} subjects, {file_idx+1} of {n_files_per_subject} files : {filenm}" )
 
@@ -134,28 +126,11 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
                 recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, "od_o", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
                 
                 # !!! quantify slopes for walking filter and plot?
-                
-                # Get the slope of 'od' before motion correction and any bandpass filtering
-                # foo = recTmp['od_imu'].copy()           # !!! not really using, either plot later or delete?
-                # foo = foo.pint.dequantify()
-                # slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-                # slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-                # slope_base = slope_base.assign_coords(channel = recTmp['od_imu'].channel)
-                # slope_base = slope_base.assign_coords(wavelength = recTmp['od_imu'].wavelength)
-                
                 slope_imu = quant_slope(recTmp, "od_imu", True)
                 
         
-        
             # Get the slope of 'od' before motion correction and any bandpass filtering
             slope_base = quant_slope(recTmp, "od", True)
-            # foo = recTmp['od'].copy()
-            # foo = foo.pint.dequantify()
-            # slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-            # slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-            # slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
-            # slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
-
             # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
 
 
@@ -176,10 +151,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
 
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = quant_slope(recTmp, "od_tddr", False)
-            # slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
-            # slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
-            # slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
-            # slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
 
             # GVTD for TDDR before bandpass filtering
@@ -243,7 +214,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             snr1, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda1), cfg_preprocess['cfg_prune']['snr_thresh'])
 
 
-            pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, cfg_dataset['root_dir'], cfg_dqr['stim_lst_dqr'] )
+            pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, cfg_dataset['root_dir'], cfg_dataset['cfg_hrf']['stim_lst'] )
 
             # load the sidecar json file 
             if os.path.exists(file_path + '.json'):
@@ -430,11 +401,10 @@ def GLM(rec, rec_str, cfg_GLM):
     # build regressors
     dm, channel_wise_regressors = glm.make_design_matrix(
         rec[rec_str],
-        #ts_long,
         ts_short,
         rec.stim,
         rec.geo3d,
-        basis_function = glm.GaussianKernels(cfg_GLM['t_pre'], cfg_GLM['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
+        basis_function = glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
         drift_order = cfg_GLM['drift_order'],
         short_channel_method = cfg_GLM['short_channel_method']
     )
