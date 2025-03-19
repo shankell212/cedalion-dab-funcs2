@@ -26,13 +26,13 @@ import json
 import sys
 #sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 #sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\cedalion-dab-funcs2')
-sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2')
-import DABfuncs_load_and_preprocess as pfDAB
-import DABfuncs_plot_DQR as pfDAB_dqr
-import DABfuncs_group_avg as pfDAB_grp_avg
-import DABfuncs_ERBM_ICA as pfDAB_ERBM
-import DABfuncs_image_recon as pfDAB_img
-import spatial_basis_funs_ced as sbf 
+sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
+import module_load_and_preprocess as pfDAB
+import module_plot_DQR as pfDAB_dqr
+import module_group_avg as pfDAB_grp_avg    
+import module_ERBM_ICA as pfDAB_ERBM
+import module_image_recon as pfDAB_img
+import module_spatial_basis_funs_ced as sbf 
 
 
 # Turn off all warnings
@@ -51,17 +51,19 @@ importlib.reload(pfDAB_grp_avg)
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
+cfg_hrf = {
+    'stim_lst' : ['ST', 'DT'], 
+    't_pre' : 5 *units.s, 
+    't_post' : 33 *units.s
+    #'t_post' : [ 33, 33 ] *units.s   # !!! GLM does not let you have different time ranges for diff stims right now
+    }
 
 cfg_dataset = {
-    #'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Esplanade/',
-    #'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
     'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
     'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
-    #'subj_ids' : ['01'],
     'file_ids' : ['IWHD_run-01'],
     'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
-    
-    #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
+    'cfg_hrf' : cfg_hrf
 }
 
 # Add 'filenm_lst' separately after cfg_dataset is initialized
@@ -71,10 +73,7 @@ cfg_dataset['filenm_lst'] = [
     for file_id in cfg_dataset['file_ids']
     ]
 
-cfg_dqr = {
-    'stim_lst_dqr' : ['ST', 'DT'] # FIXME: why have multiple of this
-    #'stim_lst_dqr' : ['STS']
-}
+
 
 cfg_prune = {
     'snr_thresh' : 5, # the SNR (std/mean) of a channel. 
@@ -88,7 +87,7 @@ cfg_prune = {
     'flag_use_psp' : False
 }
 
-cfg_imu_glm = {'statesPerDataFrame' : 89,
+cfg_imu_glm = {'statesPerDataFrame' : 89,   # FOR WALKING DATA
 		'hWin' : np.arange(-3,5,1), # window for impulse response function 
 		'statesPerDataFrame' : 89,
 		'n_components' : [3, 2],  # [gyro, accel]       # --- note: this will change fig sizes
@@ -111,18 +110,20 @@ cfg_bandpass = {
     'fmax' : 0.5 * units.Hz  #3 * units.Hz
 }
 
+
 cfg_GLM = {
     'drift_order' : 1,
-    'distance_threshold' : 20*units.mm, # for ssr
+    'distance_threshold' : 20 *units.mm, # for ssr
     'short_channel_method' : 'mean',
-    'noise_model' : "ols",
-    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
-    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
-    't_pre' : 5*units.s, 
-    't_post' : 33*units.s   # !!! make same as blockaverage???
-    }
+    'noise_model' : "ols",    # !!! add choice of basis func 
+    't_delta' : 1 *units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
+    't_std' : 1 *units.s ,     #  the temporal spacing between consecutive gaussians
+    'cfg_hrf' : cfg_hrf
+    }           
+
 
 cfg_preprocess = {
+    'flag_prune_chans' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
     'median_filt' : 3, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
@@ -151,25 +152,30 @@ cfg_blockavg = {
     #'rec_str_lst' : ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr'],
     'rec_str_lst' : ['od_tddr', 'od_o_tddr'],   # list of rec_str you want to block average
     'rec_str_lst_use_weighted' : [False, True],  #, False, True] ,  # list indicating whether to save weighted for each rec_str
-    'trange_hrf' : [5, 35] * units.s,
-    'trange_hrf_stat' : [10, 20],
-    'stim_lst_hrf' : ['ST', 'DT'], # FIXME: why have multiple of this
-    #'stim_lst_hrf' : ['STS'], 
+    'cfg_hrf' : cfg_hrf,
+    'trange_hrf_stat' : [10, 20],  
     'flag_save_group_avg_hrf': True,
     'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
     }               
 
+# !!! To get rid of rec_str_lst_use_weighted -- have flag_prune_chans, if True then don't do weighted avg either and prune chans, if false then do not prune and do weighted avg
+#       ->  still need to have pruned chan data to know which chans have bad quality for mse ... so run up until you actually prune them and only prune if flag = true
+#       -> get rid of _o_ in unpruned rec_str name
+#           -still put _weighted in trial_type for blockaverage
+#       -> change pickle file name to say pruned or weighted or whatever
+#       -> ~keep~ rec_str_lst
 
 cfg_erbmICA = {}
 
-save_path = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
+save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
 
-flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
+flag_load_preprocessed_data = True  # if 1, will skip load_and_preprocess function and use saved data
 flag_save_preprocessed_data = False   # SAVE or no save
 
 flag_load_blockaveraged_data = False
+
 
 
 # %% Load and preprocess the data
@@ -201,7 +207,9 @@ importlib.reload(pfDAB)
 # RUN PREPROCESSING
 if not flag_load_preprocessed_data:
     print("Running load and process function")
-    rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
+    
+    # RUN preprocessing
+    rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess )
     
     
     # SAVE preprocessed data 
@@ -225,7 +233,8 @@ if not flag_load_preprocessed_data:
             json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
         print("Preprocessed data successfully saved.")
         
-# LOAD in saved data
+        
+# LOAD IN SAVED DATA
 else:
     print("Loading saved data")
     with gzip.open( os.path.join(save_path, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
@@ -234,26 +243,9 @@ else:
          chs_pruned_subjs = pickle.load(f)
     print(f'Data loaded successfully for {cfg_dataset["file_ids"][0].split("_")[0]}')
 
-#%%
-if flag_save_preprocessed_data:
-    print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
-    with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
-        pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
-        
-    with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'wb') as f:
-        pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
-        
-        
-    # SAVE cfg params to json file
-    # !!! ADD image recon cfg 
-    dict_cfg_save = {"cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
-    cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + '.json'
 
-    with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
-        json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
-    print("Preprocessed data successfully saved.")
+
+
 
 # %% ERBM ICA Filtering 
 ##############################################################################
@@ -307,11 +299,12 @@ importlib.reload(pfDAB_grp_avg)
 
 flag_load_blockaveraged_data = False
 
-#rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
-#rec_str_lst = ['od_tddr', 'od_o_tddr']
-rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
 
-rec_str_lst_use_weighted = [False, True]  #, False, True] 
+#rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
+rec_str_lst = ['od_o_tddr_postglm']
+#rec_str_lst_use_weighted = [False, True, False, True] 
+rec_str_lst_use_weighted = [True]
+
 # !!!  ^^^use for  image recon -> if Cmeas false or true
 
 # for saving file name 
