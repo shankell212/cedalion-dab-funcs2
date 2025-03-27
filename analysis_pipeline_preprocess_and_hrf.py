@@ -6,7 +6,7 @@ import os
 import cedalion
 import cedalion.nirs
 import cedalion.sigproc.quality as quality
-
+import cedalion.xrutils as xrutils
 from cedalion.sigdecomp.ERBM import ERBM
 
 import xarray as xr
@@ -60,7 +60,8 @@ cfg_hrf = {
 
 cfg_dataset = {
     'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
-    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14'],
+    'subj_ids' : ['01','02'],
     'file_ids' : ['IWHD_run-01'],
     'subj_id_exclude' : ['10'], #['05','07'] # if you want to exclude a subject from the group average
     'cfg_hrf' : cfg_hrf
@@ -97,10 +98,10 @@ cfg_imu_glm = {'statesPerDataFrame' : 89,   # FOR WALKING DATA
 }
 
 cfg_motion_correct = {
-    'flag_do_splineSG' : False, # if True, will do splineSG motion correction
-    'splineSG_p' : 0.99, 
-    'splineSG_frame_size' : 10 * units.s,
-    'flag_do_tddr' : True,  # !!! This isn't doing anything? - don't think I've added a check in the code so tddr is always done
+    #'flag_do_splineSG' : False, # !!! This is not doing anything. left out for now. if True, will do splineSG motion correction
+    #'splineSG_p' : 0.99, 
+    #'splineSG_frame_size' : 10 * units.s,
+    'flag_do_tddr' : True,  
     'flag_do_imu_glm' : True,
     'cfg_imu_glm' : cfg_imu_glm,
 }
@@ -123,7 +124,7 @@ cfg_GLM = {
 
 
 cfg_preprocess = {
-    'flag_prune_chans' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
+    'flag_prune_channels' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
     'median_filt' : 3, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
@@ -150,11 +151,11 @@ cfg_mse_od = {
 
 cfg_blockavg = {
     #'rec_str_lst' : ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr'],
-    'rec_str_lst' : ['od_tddr', 'od_o_tddr'],   # list of rec_str you want to block average
-    'rec_str_lst_use_weighted' : [False, True],  #, False, True] ,  # list indicating whether to save weighted for each rec_str
+    'rec_str_lst' : ['od_tddr'],   # list of rec_str you want to block average
+    'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
     'cfg_hrf' : cfg_hrf,
     'trange_hrf_stat' : [10, 20],  
-    'flag_save_group_avg_hrf': True,
+    'flag_save_group_avg_hrf': False,
     'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
@@ -171,7 +172,7 @@ cfg_erbmICA = {}
 
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
 
-flag_load_preprocessed_data = True  # if 1, will skip load_and_preprocess function and use saved data
+flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
 flag_save_preprocessed_data = False   # SAVE or no save
 
 flag_load_blockaveraged_data = False
@@ -199,11 +200,16 @@ for subj_id in cfg_dataset['subj_ids']:
         else:
             cfg_dataset['filenm_lst'][subj_idx].append( filenm )
 
+# !!! UPDATE file name based on cfg params - i.e. imu_glm, ma corrected, glm filter, pruned or unpruned
 
 import importlib
 importlib.reload(pfDAB)
 
-
+if cfg_preprocess['flag_prune_channels']:  # to identify if data is pruned or unpruned
+    p_save_str =  '_pruned' 
+else:
+    p_save_str =  '_unpruned' 
+    
 # RUN PREPROCESSING
 if not flag_load_preprocessed_data:
     print("Running load and process function")
@@ -216,19 +222,20 @@ if not flag_load_preprocessed_data:
     if flag_save_preprocessed_data:
         print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                     'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
+                                     'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
             pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
             
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                     'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'wb') as f:
+                                     'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f:
             pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
             
             
         # SAVE cfg params to json file
-        # !!! ADD image recon cfg 
-        dict_cfg_save = {"cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
-        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + '.json'
-
+        # !!! ADD image recon cfg  ?? - or make it its own .json since i am planning to separate into 2 scripts
+        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+        
+        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.json'
+            
         with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
             json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
         print("Preprocessed data successfully saved.")
@@ -236,7 +243,7 @@ if not flag_load_preprocessed_data:
         
 # LOAD IN SAVED DATA
 else:
-    print("Loading saved data")
+    print("Loading saved data")   # !!! update with new naming for pruned or unpruned above
     with gzip.open( os.path.join(save_path, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
          rec = pickle.load(f)
     with gzip.open( os.path.join(save_path, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f:
@@ -298,40 +305,44 @@ import importlib
 importlib.reload(pfDAB_grp_avg)
 
 flag_load_blockaveraged_data = False
-
+cfg_blockavg['flag_save_group_avg_hrf'] = False
 
 #rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
-rec_str_lst = ['od_o_tddr_postglm']
-#rec_str_lst_use_weighted = [False, True, False, True] 
-rec_str_lst_use_weighted = [True]
+# rec_str_lst = ['od_tddr', 'od_tddr_postglm']
 
-# !!!  ^^^use for  image recon -> if Cmeas false or true
+rec_str = 'od_corrected'  # will be either 'conc' or 'od_corrected' now
 
 # for saving file name 
-if 'conc' in rec_str_lst[0]:  
-    save_str = 'CONC'
+if cfg_preprocess['flag_prune_channels']:
+    save_str_suffix = '_unweighted'
 else:
-    save_str = 'OD'
+    save_str_suffix = '_weighted'
+    
+if 'conc' in rec_str:  
+    save_str = 'CONC' + save_str_suffix
+else:
+    save_str = 'OD' + save_str_suffix
+    
+    
 
 # Compute block average
 if not flag_load_blockaveraged_data:
-    # !!! ADD in function if rec_str_use_weighted_lst is NONE then assume to save weighted for all trial types and for new_lst_use_weighted return NONE
-    # !!! ^^ OR ASSUME SAVE UNWEIGHTED???
-    blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.get_group_avg_for_diff_conds(rec, 
-                                                                                                                                 rec_str_lst, rec_str_lst_use_weighted,  chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # save the results to a pickle file
-    blockaverage = blockaverage_mean
-
-    # Compute new rec_str_lst_use_weighted
-    new_rec_str_lst_use_weighted = []
-    [new_rec_str_lst_use_weighted .extend([value] * len(cfg_blockavg['stim_lst_hrf'])) for value in rec_str_lst_use_weighted] # Repeat each value for each trial type
+    # blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.get_group_avg_for_diff_conds(rec, rec_str_lst,
+    #                                                                                                                              chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    # # save the results to a pickle file
+    # blockaverage = blockaverage_mean
+    
+    if cfg_preprocess['flag_prune_channels']:
+        _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, 'od_corrected', chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    else:
+        blockaverage_mean, _,  blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, 'od_corrected', chs_pruned_subjs, cfg_dataset, cfg_blockavg )
 
     
     groupavg_results = {'blockaverage': blockaverage_mean,
                'blockaverage_stderr': blockaverage_stderr,
                'blockaverage_subj': blockaverage_subj,
                'blockaverage_mse_subj': blockaverage_mse_subj,
-               'new_rec_str_lst_use_weighted' : new_rec_str_lst_use_weighted,
+               #'new_rec_str_lst_use_weighted' : new_rec_str_lst_use_weighted,
                'geo2d' : rec[0][0].geo2d,
                'geo3d' : rec[0][0].geo3d
                }
@@ -350,11 +361,11 @@ else: # LOAD data
     if os.path.exists(filepath_bl):
         with gzip.open(filepath_bl, 'rb') as f:
             groupavg_results = pickle.load(f)
-        blockaverage = groupavg_results['blockaverage']
+        blockaverage_mean = groupavg_results['blockaverage']
         blockaverage_stderr = groupavg_results['blockaverage_stderr']
         blockaverage_subj = groupavg_results['blockaverage_subj']
         blockaverage_mse_subj = groupavg_results['blockaverage_mse_subj']
-        new_rec_str_lst_use_weighted = groupavg_results['new_rec_str_lst_use_weighted']
+        #new_rec_str_lst_use_weighted = groupavg_results['new_rec_str_lst_use_weighted']
         geo2d = groupavg_results['geo2d']
         geo2d = groupavg_results['geo3d']
         print("Blockaverage file loaded successfully!")
@@ -362,7 +373,7 @@ else: # LOAD data
     else:
         print(f"Error: File '{filepath_bl}' not found!")
         
-blockaverage_all = blockaverage.copy()
+blockaverage_all = blockaverage_mean.copy()
 
 
 
