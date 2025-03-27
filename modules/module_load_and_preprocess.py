@@ -100,7 +100,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
                 
                 # Check if walking condition exists in rec.stim, if no then sets flag_do_imu_glm to false
-                if not recTmp.stim.isin(["start_walk"]).any().any():
+                if not recTmp.stim.isin(["start_walk"]).any().any():   # !!! ADD end walk, start stand and end stand
                     cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
                     print("No walking condition found in events.tsv. Skipping imu glm filtering step.")
                     
@@ -112,63 +112,60 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
+            
+            pruned_chans = chs_pruned.where(chs_pruned != 0.4, drop=True).channel.values # get array of channels that were pruned
 
-            # calculate optical density
-            recTmp["od"] = cedalion.nirs.int2od(recTmp['amp_pruned'])
-            recTmp["od_o"] = cedalion.nirs.int2od(recTmp['amp'])
+            # Calculate OD 
+            # if flag pruned channels is True, then do rest of preprocessing on pruned amp, if not then do preprocessing on unpruned data
+            if cfg_preprocess['flag_prune_channels']:
+                recTmp["od"] = cedalion.nirs.int2od(recTmp['amp_pruned'])                
+            else:
+                recTmp["od"] = cedalion.nirs.int2od(recTmp['amp'])
+                del recTmp.timeseries['amp_pruned']   # delete pruned amp from time series
             
-            # Calculate gvtd
-            recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
+            # Calculate GVTD on pruned data
+            amp_masked = prune_mask_ts(recTmp['amp'], pruned_chans)  # use chs_pruned to get gvtd w/out pruned data (could also zscore in gvtd func)
+            recTmp.aux_ts["gvtd"], _ = quality.gvtd(amp_masked) 
             
-            # Walking filter 
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:     # and np.any(recTmp.aux_ts['ACCEL_X'] != 0): # This might not always work?
-                recTmp["od_imu"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
-                recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, "od_o", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+            # Walking filter
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']: 
+                recTmp["od_corrected"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
                 
-                # !!! quantify slopes for walking filter and plot?
-                slope_imu = quant_slope(recTmp, "od_imu", True)
-                
-        
             # Get the slope of 'od' before motion correction and any bandpass filtering
             slope_base = quant_slope(recTmp, "od", True)
-            # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
 
-
-            # Spline SG
-            if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
-                recTmp, slope = motionCorrect_SplineSG( recTmp, cfg_preprocess['cfg_bandpass'] )
-            else:
-                slope = None
-
+            # Spline SG # !!! fix me in future
+            # if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
+            #     recTmp, slope = motionCorrect_SplineSG( recTmp, cfg_preprocess['cfg_bandpass'] ) 
+            # else:
+            #     slope = None
+            
             # TDDR
-            recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
-            recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
+            if cfg_preprocess['cfg_motion_correct']['flag_do_tddr']:
+                if 'od_corrected' in recTmp.timeseries.keys():
+                    recTmp['od_corrected'] = motion_correct.tddr( recTmp['od_corrected'] )  
+                else:   # do tddr on uncorrected od
+                    recTmp['od_corrected'] = motion_correct.tddr( recTmp['od'] )  
+            else:
+                if 'od_corrected' not in recTmp.timeseries.keys():
+                    recTmp['od_corrected'] = recTmp['od']
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
-                recTmp['od_imu_tddr'] = motion_correct.tddr( recTmp['od_imu'] )
-                recTmp['od_o_imu_tddr'] = motion_correct.tddr( recTmp['od_o_imu'] )
-                
-
             # Get slopes after TDDR before bandpass filtering
-            slope_tddr = quant_slope(recTmp, "od_tddr", False)
-
-
+            slope_corrected = quant_slope(recTmp, "od_corrected", False)  
+            
+            
             # GVTD for TDDR before bandpass filtering
-            amp_tddr = recTmp['od_tddr'].copy()
-            amp_tddr.values = np.exp(-amp_tddr.values)
-            recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
+            amp_corrected = recTmp['od_corrected'].copy()  
+            amp_corrected.values = np.exp(-amp_corrected.values)
+            amp_corrected_masked = prune_mask_ts(amp_corrected, pruned_chans)  # get "pruned" amp data post tddr
+            recTmp.aux_ts['gvtd_corrected'], _ = quality.gvtd(amp_corrected_masked)    
             
             
-            # bandpass filter od_tddr
+            # Bandpass filter od_tddr
             fmin = cfg_preprocess['cfg_bandpass']['fmin']
             fmax = cfg_preprocess['cfg_bandpass']['fmax']
-            recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
-            recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
+            recTmp['od_corrected'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_corrected'], fmin, fmax)  
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
-                recTmp['od_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_imu_tddr'], fmin, fmax)
-                recTmp['od_o_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_imu_tddr'], fmin, fmax)
-
             # Convert OD to Conc
             dpf = xr.DataArray(
                 [1, 1],
@@ -176,45 +173,29 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                 coords={"wavelength": recTmp['amp'].wavelength},
             )
             
-            # SplineSG Conc
-            if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
-                recTmp['conc_splineSG'] = cedalion.nirs.od2conc(recTmp['od_splineSG'], recTmp.geo3d, dpf, spectrum="prahl")
-
-            # TDDR Conc
-            recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-            recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-
-            # filtered walking conc
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
-                recTmp['conc_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-                recTmp['conc_o_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+           
+            # Conc
+            recTmp['conc'] = cedalion.nirs.od2conc(recTmp['od_corrected'], recTmp.geo3d, dpf, spectrum="prahl")
 
             # GLM filtering step
             if cfg_preprocess['flag_do_GLM_filter']:
-                recTmp = GLM(recTmp, 'conc_tddr', cfg_preprocess['cfg_GLM'])
-                recTmp = GLM(recTmp, 'conc_o_tddr', cfg_preprocess['cfg_GLM'])
+                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'])
                 
-                recTmp['od_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_tddr'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
-                recTmp['od_o_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_o_tddr'], recTmp.geo3d, dpf)
-                
-                if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
-                    recTmp = GLM(recTmp, 'conc_imu_tddr', cfg_preprocess['cfg_GLM'])
-                    recTmp = GLM(recTmp, 'conc_o_imu_tddr', cfg_preprocess['cfg_GLM'])
-                    
-                    recTmp['od_imu_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_imu_tddr'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
-                    recTmp['od_o_imu_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_o_imu_tddr'], recTmp.geo3d, dpf)
-                              
+                recTmp['od_corrected'] = cedalion.nirs.conc2od(recTmp['conc'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
+                recTmp['od_corrected'] = recTmp['od_corrected'].transpose('channel', 'wavelength', 'time') # need to transpose to match recTmp['od'] bc conc2od switches the axes
             
             #
             # Plot DQRs
             #
-            lambda0 = recTmp['amp_pruned'].wavelength[0].wavelength.values
-            lambda1 = recTmp['amp_pruned'].wavelength[1].wavelength.values
-            snr0, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda0), cfg_preprocess['cfg_prune']['snr_thresh'])
-            snr1, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda1), cfg_preprocess['cfg_prune']['snr_thresh'])
+           
+            lambda0 = amp_masked.wavelength[0].wavelength.values
+            lambda1 = amp_masked.wavelength[1].wavelength.values
+            snr0, _ = quality.snr(amp_masked.sel(wavelength=lambda0), cfg_preprocess['cfg_prune']['snr_thresh'])
+            snr1, _ = quality.snr(amp_masked.sel(wavelength=lambda1), cfg_preprocess['cfg_prune']['snr_thresh'])
 
-
-            pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, cfg_dataset['root_dir'], cfg_dataset['cfg_hrf']['stim_lst'] )
+            
+            pfDAB_dqr.plotDQR( recTmp, chs_pruned, cfg_preprocess, filenm, cfg_dataset['root_dir'], cfg_dataset['cfg_hrf']['stim_lst'] )
+            # !!! make slope sep DQR plot
 
             # load the sidecar json file 
             if os.path.exists(file_path + '.json'):
@@ -226,6 +207,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             snr0 = np.nanmedian(snr0.values)
             snr1 = np.nanmedian(snr1.values)
 
+
             #
             # Organize the processed data
             #
@@ -233,32 +215,32 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                 rec = []
                 chs_pruned_subjs = []
                 slope_base_subjs = []
-                slope_tddr_subjs = []
-                gvtd_tddr_subjs = []
+                slope_corrected_subjs = []
+                gvtd_corrected_subjs = []
                 snr0_subjs = []
                 snr1_subjs = []
 
                 rec.append( [recTmp] )
                 chs_pruned_subjs.append( [chs_pruned] )
                 slope_base_subjs.append( [slope_base] )
-                slope_tddr_subjs.append( [slope_tddr] )
-                gvtd_tddr_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_tddr'].values)] )
+                slope_corrected_subjs.append( [slope_corrected] )
+                gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
                 snr0_subjs.append( [snr0] )
                 snr1_subjs.append( [snr1] )
             elif file_idx == 0:
                 rec.append( [recTmp] )
                 chs_pruned_subjs.append( [chs_pruned] )
                 slope_base_subjs.append( [slope_base] )
-                slope_tddr_subjs.append( [slope_tddr] )
-                gvtd_tddr_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_tddr'].values)] )
+                slope_corrected_subjs.append( [slope_corrected] )
+                gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
                 snr0_subjs.append( [snr0] )
                 snr1_subjs.append( [snr1] )
             else:
                 rec[subj_idx].append( recTmp )
                 chs_pruned_subjs[subj_idx].append( chs_pruned )
                 slope_base_subjs[subj_idx].append( slope_base )
-                slope_tddr_subjs[subj_idx].append( slope_tddr )
-                gvtd_tddr_subjs[subj_idx].append( np.nanmean(recTmp.aux_ts['gvtd_tddr'].values) )
+                slope_corrected_subjs[subj_idx].append( slope_corrected )
+                gvtd_corrected_subjs[subj_idx].append( np.nanmean(recTmp.aux_ts['gvtd_corrected'].values) )
                 snr0_subjs[subj_idx].append( snr0 )
                 snr1_subjs[subj_idx].append( snr1 )
 
@@ -266,11 +248,71 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
     # End of subject loop
 
     # plot the group DQR
-    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], rec, cfg_dataset['root_dir'], flag_plot=False )
+    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], rec, cfg_dataset['root_dir'], flag_plot=False )
 
     
     return rec, chs_pruned_subjs
 
+
+#%%
+
+
+# def preprocess_post_ma_corr(recTmp, p_rec_str, cfg_dataset, cfg_preprocess, filenm, ):
+
+#     # Get slopes after TDDR before bandpass filtering
+#     slope_ma = quant_slope(recTmp, f'od_{p_rec_str}', False)
+    
+    
+#     # GVTD for TDDR before bandpass filtering
+#     amp_ma = recTmp[f'od_{p_rec_str}'].copy()
+#     amp_ma.values = np.exp(-amp_ma.values)
+#     recTmp.aux_ts[f'gvtd_{p_rec_str}'], _ = quality.gvtd(amp_ma)
+    
+    
+#     # bandpass filter od_tddr
+#     fmin = cfg_preprocess['cfg_bandpass']['fmin']
+#     fmax = cfg_preprocess['cfg_bandpass']['fmax']
+#     recTmp[f'od_{p_rec_str}'] = cedalion.sigproc.frequency.freq_filter(recTmp[f'od_{p_rec_str}'], fmin, fmax)
+    
+
+#     # Convert OD to Conc
+#     dpf = xr.DataArray(
+#         [1, 1],
+#         dims="wavelength",
+#         coords={"wavelength": recTmp['amp'].wavelength},
+#     )
+    
+#     # Convert to conc Conc
+#     recTmp[f'conc_{p_rec_str}'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+    
+#     # GLM filtering step
+#     if cfg_preprocess['flag_do_GLM_filter']:
+#         recTmp = GLM(recTmp, f'conc_{p_rec_str}', cfg_preprocess['cfg_GLM'])
+        
+#         recTmp[f'od_{p_rec_str}_postglm'] = cedalion.nirs.conc2od(recTmp[f'conc_{p_rec_str}'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
+        
+#     return recTmp
+
+def prune_mask_ts(ts, channels_to_nan):
+    '''
+    Function to mask pruned channels with NaN .. essentially repruning channels
+    Parameters
+    ----------
+    ts : data array
+        time series from rec[rec_str].
+    channels_to_nan : list or array
+        list or array of channels that were pruned prior.
+
+    Returns
+    -------
+    ts_masked : data array
+        time series that has been "repruned" or masked with data for the pruned channels as NaN.
+
+    '''
+    mask = np.isin(ts.channel.values, channels_to_nan)
+    mask_expanded = mask[:, None, None]
+    ts_masked = ts.where(~mask_expanded, np.nan)
+    return ts_masked
 
 def preprocess(rec, median_filt ):
 
@@ -349,8 +391,6 @@ def pruneChannels( rec, cfg_prune ):
     # record the pruned array in the record
     rec['amp_pruned'] = amp_pruned
 
-
-
     perc_time_clean_thresh = cfg_prune['perc_time_clean_thresh']
     sci_threshold = cfg_prune['sci_threshold']
     psp_threshold = cfg_prune['psp_threshold']
@@ -426,20 +466,13 @@ def GLM(rec, rec_str, cfg_GLM):
                         )
     
     pred_hrf = pred_hrf.pint.quantify('micromolar')
-
-    # rec['pred_hrf'] = pred_hrf + residual 
-    # #### get average HRF prediction 
-    # rec['pred_hrf'] = rec['pred_hrf'].transpose('chromo', 'channel', 'time')
-    # rec['pred_hrf'] = rec['pred_hrf'].assign_coords(samples=("time", np.arange(len(rec['pred_hrf'].time))))
-    # rec['pred_hrf']['time'] = rec['pred_hrf'].time.pint.quantify(units.s) 
     
-    
-    rec[rec_str + '_postglm'] = pred_hrf + residual 
+    rec[rec_str] = pred_hrf + residual 
     
     #### get average HRF prediction 
-    rec[rec_str + '_postglm'] = rec[rec_str + '_postglm'].transpose('chromo', 'channel', 'time')
-    rec[rec_str + '_postglm'] = rec[rec_str + '_postglm'].assign_coords(samples=("time", np.arange(len(rec[rec_str + '_postglm'].time))))
-    rec[rec_str + '_postglm']['time'] = rec[rec_str + '_postglm'].time.pint.quantify(units.s) 
+    rec[rec_str] = rec[rec_str].transpose('chromo', 'channel', 'time')
+    rec[rec_str] = rec[rec_str].assign_coords(samples=("time", np.arange(len(rec[rec_str].time))))
+    rec[rec_str]['time'] = rec[rec_str].time.pint.quantify(units.s) 
              
     
     return rec

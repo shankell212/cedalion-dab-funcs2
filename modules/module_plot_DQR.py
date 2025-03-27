@@ -9,23 +9,192 @@ import cedalion.xrutils as xrutils
 import cedalion.datasets as datasets
 import xarray as xr
 import matplotlib.pyplot as p
+import matplotlib.colors as clrs
 import cedalion.plots as plots
-#import cedalion.vis.time_series as vTimeSeries
 from cedalion import units
 import numpy as np
 
-from scipy.cluster.hierarchy import dendrogram, linkage, leaves_list, fcluster
-from scipy.spatial.distance import squareform
-
-from sklearn.decomposition import PCA
-from cedalion.sigdecomp.ERBM import ERBM
-from scipy import stats
 from scipy.signal import filtfilt
 from scipy.signal.windows import gaussian
 
+import pdb
 
 
-def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
+def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None, filepath = None, stim_lst_str = None ):
+
+    f, ax = p.subplots(3, 2, figsize=(11, 14))
+
+    # Plot GVTD
+    ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd"], color='b', label="GVTD")
+    ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd_corrected"], color='#ff4500', label="GVTD corrected")
+    ax[0][0].set_xlabel("time / s")
+    ax[0][0].set_title(f"{filenm}")
+    thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'], 'histogram_mode', n_std = 10)
+    ax[0][0].axhline(thresh.values, color='b', linestyle='--', label=f'Thresh {thresh:.1e}')
+    thresh_corrected = quality._get_gvtd_threshold(rec.aux_ts['gvtd_corrected'], 'histogram_mode', n_std = 10)
+
+    ax[0][0].axhline(thresh_corrected.values, color='#ff4500', linestyle='--', label=f'Thresh {thresh_corrected:.1e}')
+    ax[0][0].legend()
+
+    stim = rec.stim.copy()
+    if stim_lst_str is not None:
+        plots.plot_stim_markers(ax[0][0], stim[stim.trial_type.isin(stim_lst_str)], y=1)
+    # add stim_lst_str to the legend
+    handles, labels = ax[0][0].get_legend_handles_labels()
+    labels.append(stim_lst_str)
+    ax[0][0].legend(handles, labels)
+
+
+    # Plot the pruned channels
+    idx_good = np.where(chs_pruned.values == 0.4)[0]
+    plots.scalp_plot( 
+            rec["amp"],
+            rec.geo3d,
+            chs_pruned,
+            ax[0][1],
+            cmap='gist_rainbow',
+            vmin=0,
+            vmax=1,
+            optode_labels=False,
+            title=f"Pruned Channels {(len(chs_pruned)-len(idx_good))/len(chs_pruned)*100:.1f}%",
+            optode_size=6
+        )
+    
+    
+    # plot variance of OD along time axis for wavelength 1 (post corrected) 
+    # !!! will want to make more modular by allowing any od rec_str in future
+    ax1 = ax[1][0]
+    #pdb.set_trace()
+    variance_vals = np.log10( rec['od_corrected'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav = rec['amp'].wavelength.values[0]  # first wav
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=0),  # first wav
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_corrected Variance - {wav} nm",
+            optode_size=6
+        )
+    
+    # plot variance of OD along time axis for wavelength 2 (post correction) 
+    ax1 = ax[1][1]
+    variance_vals = np.log10( rec['od_corrected'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav = rec['amp'].wavelength.values[1]  # 2nd wav
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=1),  # 2nd wav
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_corrected Variance - {wav} nm",
+            optode_size=6
+        )
+
+    # Plot SNR (for wav 1)
+    ax1 = ax[2][0]
+    snr_thresh = cfg_preprocess['cfg_prune']['snr_thresh']
+    snr, snr_mask = quality.snr(rec['amp'], snr_thresh)
+    
+    snr_mask_wav = snr_mask.isel(wavelength=0)
+    num_above_thresh = snr_mask_wav.sum().item() # count 'True' (num chans where SNR > thresh)
+    
+    wav = rec['amp'].wavelength.values[0]
+    plots.scalp_plot(
+            rec["amp"],
+            rec.geo3d,
+            snr.isel(wavelength=0),
+            ax1,
+            cmap='jet',
+            vmin = 0,  #np.min(snr.isel(wavelength=0)),
+            vmax = 25,  #np.max(snr.isel(wavelength=0)),
+            optode_labels=False,
+            title=f"SNR - {wav} nm ({num_above_thresh} channels > threshold = {snr_thresh})",
+            optode_size=6
+        )
+    
+    # Plot SNR (for wav 2)
+    ax1 = ax[2][1]
+    snr_thresh = cfg_preprocess['cfg_prune']['snr_thresh']
+    snr, snr_mask = quality.snr(rec['amp'], snr_thresh)
+    
+    snr_mask_wav = snr_mask.isel(wavelength=1)
+    num_above_thresh = snr_mask_wav.sum().item() # count 'True' (num chans where SNR > thresh)
+    
+    wav = rec['amp'].wavelength.values[1]
+    plots.scalp_plot(
+            rec["amp"],
+            rec.geo3d,
+            snr.isel(wavelength=1),
+            ax1,
+            cmap='jet',
+            vmin = 0,  #np.min(snr.isel(wavelength=1)),
+            vmax = 25,  #np.max(snr.isel(wavelength=1)),
+            optode_labels=False,
+            title=f"SNR - {wav} nm ({num_above_thresh} channels > threshold = {snr_thresh})",
+            optode_size=6
+        )
+
+        
+    # give a title to the figure
+    if cfg_preprocess['flag_prune_channels']:  # !!! add if puned or unpruned to title and file name? - matters for gvtd and variance
+        flag_prune = '_pruned'
+    else:
+        flag_prune = '_unpruned'
+        
+    fig_title = filenm + flag_prune
+    
+    p.suptitle(fig_title)
+
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', fig_title + "_DQR.png") )
+    p.close()
+
+    # Plot the GVTD Histograms
+    thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
+    p.suptitle(fig_title)
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', fig_title + "_DQR_gvtd_hist.png") )
+    p.close()
+
+    thresh_corrected = make_gvtd_hist(rec.aux_ts['gvtd_corrected'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+    p.suptitle(fig_title)
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', fig_title + "_DQR_gvtd_hist_corrected.png") )
+    p.close()
+    
+    
+    # p.suptitle(filenm)
+
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR.png") )
+    # p.close()
+
+    # # Plot the GVTD Histograms
+    # thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
+    # p.suptitle(filenm)
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist.png") )
+    # p.close()
+
+    # thresh_corrected = make_gvtd_hist(rec.aux_ts['gvtd_corrected'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+    # p.suptitle(filenm)
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist_corrected.png") )
+    # p.close()
+
+
+    return
+
+
+# !!! keeping old plotting func to go back and use slope stuff for diff fig
+def plotDQR_old( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
 
     f, ax = p.subplots(3, 2, figsize=(11, 14))
 
@@ -170,6 +339,7 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepat
 
 
     return
+
 
 
 def make_gvtd_hist(gvtd_time_trace, plot_thresh=True, stat_type=None, n_std=None, 
@@ -765,8 +935,8 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
         for file_idx in range(n_files_per_subject):
             snr0_mean[subj_idx, file_idx] = snr0_subjs[subj_idx][file_idx]
             snr1_mean[subj_idx, file_idx] = snr1_subjs[subj_idx][file_idx]
-    lambda0 = rec[0][0]["amp_pruned"].wavelength[0].wavelength.values
-    lambda1 = rec[0][0]["amp_pruned"].wavelength[1].wavelength.values
+    lambda0 = rec[0][0]["amp"].wavelength[0].wavelength.values
+    lambda1 = rec[0][0]["amp"].wavelength[1].wavelength.values
 
     # bar graph of the percentage of channels pruned
     f, ax = p.subplots(2,2, figsize=(9,10))
