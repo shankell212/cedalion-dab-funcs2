@@ -20,82 +20,14 @@ import pdb
 
 
 
-
-
-# def get_group_avg_for_diff_conds(rec, rec_str_lst, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
-#     '''
-#     This function takes in a list of strings (trial_types/ conditions)
-#     and loops through each rec_str and blockaverages each.
-    
-#     Inputs: 
-#         rec : list of recording objects for each subject
-#         rec_str_lst : list of strings identifying data arrays in rec you want to average
-#         flag_save_weighted : list (same size as rec_str_lst) that indicates 
-#             whether to save the weighted or unweighted for each data array in rec_str_lst
-#     '''
-    
-#     # if not rec_str_lst:
-#     #     print('No list of recording objects given. Cannot compute block average.')
-#     #     return None, None, None, None
-    
-#     # !!! why did I add this? (below) -- bc concatinating them into one xarray?
-#     if any('od' in rec_str for rec_str in rec_str_lst) & any('conc' in rec_str for rec_str in rec_str_lst):
-#         print('rec_str_lst includes both conc and od. Cannot compute blockaverage.') # !!! make this an assertion error?
-    
-
-#     for idx,rec_str in enumerate(rec_str_lst):
-        
-#         # Change trial type name to match rec_str (for concatination purposes)
-#         if 'conc' in rec_str:   
-#             new_name = rec_str[4:]
-#         else: 
-#             new_name = rec_str[2:]
-            
-#         # Run block average func
-#         y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
-        
-#         # Save weighted or unweighted
-#         # if flag_save_weighted[idx]:
-#         #     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + new_name for x in y_mean_weighted.trial_type.values])
-#         # else:
-#         #     blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + new_name for x in y_mean.trial_type.values])
-        
-        
-#         # Check if have pruned data or no pruned data 
-#         if cfg_blockavg['flag_prune_channels']: 
-#             blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + new_name + 'unweighted' for x in y_mean.trial_type.values])
-#             # save other stuff
-#             blockaverage_stderr_tmp = y_stderr_weighted.assign_coords(trial_type=[x + new_name + '_unweighted' for x in y_stderr_weighted.trial_type.values]) # also save stderr weighted
-#             blockaverage_subj_tmp = y_subj.assign_coords(trial_type=[x + new_name + '_unweighted' for x in y_subj.trial_type.values])
-#             blockaverage_mse_subj_tmp = y_mse_subj.assign_coords(trial_type=[x + new_name + '_unweighted' for x in y_mse_subj.trial_type.values])
-#         else:
-#             blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + new_name + '_weighted' for x in y_mean_weighted.trial_type.values])
-#             # save other stuff
-#             blockaverage_stderr_tmp = y_stderr_weighted.assign_coords(trial_type=[x + new_name + '_weighted' for x in y_stderr_weighted.trial_type.values]) # also save stderr weighted
-#             blockaverage_subj_tmp = y_subj.assign_coords(trial_type=[x + new_name + '_weighted' for x in y_subj.trial_type.values])
-#             blockaverage_mse_subj_tmp = y_mse_subj.assign_coords(trial_type=[x + new_name + '_weighted' for x in y_mse_subj.trial_type.values])
-        
-#         # If first loop, then initiate blockaverage var
-#         if idx == 0:
-#             blockaverage_mean = blockaverage_mean_tmp
-#             blockaverage_subj = blockaverage_subj_tmp
-#             blockaverage_mse_subj = blockaverage_mse_subj_tmp
-#             blockaverage_stderr = blockaverage_stderr_tmp
-                
-#         else:
-#             blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-#             blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp],dim='trial_type')
-#             blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp],dim='trial_type')
-#             blockaverage_stderr = xr.concat([blockaverage_stderr, blockaverage_stderr_tmp], dim='trial_type')
-            
-            
-#     return blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj
-        
-
-
-
-
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
+    
+    subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
+    # Build a new list excluding the subjects in subj_id_exclude:
+    new_filenm_lst = [
+        fname for fname in cfg_dataset['filenm_lst']
+        if str(int(fname[0].split('_')[0].replace('sub-', ''))) not in cfg_dataset['subj_id_exclude']
+    ]
     
     # choose correct mse values based on if blockaveraging od or conc
     if 'chromo' in rec[0][0][rec_str].dims:
@@ -120,11 +52,10 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
     for subj_idx in range( n_subjects ):
         for file_idx in range( n_files_per_subject ):
 
-            filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
-            print( f"   Running {subj_idx+1} of {n_subjects} subjects : {filenm}" )
-
-            # do the block average on the data in rec[subj_idx][file_idx][rec_str]
-            # rec_str could be 'conc_tddr', 'conc_tddr_ica' or 'od' or even conc_splineSG
+            #filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
+            #print( f"   Running {subj_idx+1} of {n_subjects} subjects : {filenm}" )
+            filenm = new_filenm_lst[subj_idx][file_idx]
+            print(f'Running {subj_idx+1} of {n_subjects} subjects not excluded : {filenm} ')
             
             # Check if rec_str exists for current subject
             if rec_str not in rec[subj_idx][file_idx].timeseries:
@@ -135,7 +66,6 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             
             # select the stim for the given file
             stim = rec[subj_idx][file_idx].stim.copy()
-            
                 
             # get the epochs
             # check if ts has dimenstion chromo
@@ -158,7 +88,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             
             # concatenate the different epochs from each file for each subject
             if cfg_blockavg['flag_save_each_subj']:
-                epochs_tmp = epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids[subj_idx] for x in epochs_tmp.trial_type.values]))
+                epochs_tmp = epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids_new[subj_idx] for x in epochs_tmp.trial_type.values]))
 
             if file_idx == 0:
                 epochs_all = epochs_tmp
@@ -261,28 +191,28 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
 
         # gather the blockaverage across subjects
-        if blockaverage_subj is None and subj_ids[subj_idx] not in cfg_dataset['subj_id_exclude']:
+        if blockaverage_subj is None: 
             blockaverage_subj = blockaverage
             # add a subject dimension and coordinate
             blockaverage_subj = blockaverage_subj.expand_dims('subj')
-            blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids[subj_idx]])
+            blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
 
             blockaverage_mse_subj = mse_t_o.expand_dims('subj') # mse of blockaverage for each sub
-            blockaverage_mse_subj = blockaverage_mse_subj.assign_coords(subj=[subj_ids[subj_idx]])
+            blockaverage_mse_subj = blockaverage_mse_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
             
             blockaverage_mean_weighted = blockaverage_weighted / mse_t
 
             blockaverage_mse_inv_mean_weighted = 1 / mse_t
-
-        elif subj_ids[subj_idx] not in cfg_dataset['subj_id_exclude']:
+            
+        else:   
             blockaverage_subj_tmp = blockaverage
             blockaverage_subj_tmp = blockaverage_subj_tmp.expand_dims('subj')
-            blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids[subj_idx]])
+            blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
             blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp], dim='subj')
 
             blockaverage_mse_subj_tmp = mse_t_o.expand_dims('subj')
             
-            blockaverage_mse_subj_tmp = blockaverage_mse_subj_tmp.assign_coords(subj=[subj_ids[subj_idx]])
+            blockaverage_mse_subj_tmp = blockaverage_mse_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
             blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp], dim='subj') # !!! this does not have trial types
 
 
@@ -290,17 +220,16 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
             blockaverage_mse_inv_mean_weighted = blockaverage_mse_inv_mean_weighted + 1/mse_t 
 
-        else:
-            print(f"   Subject {subj_ids[subj_idx]} excluded from group average")
         
         # DONE LOOP OVER SUBJECTS
 
-    # get the average
+    # get the unweighted average
     blockaverage_mean = blockaverage_subj.mean('subj')
     
     # get the weighted average
     blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
-
+    
+    # get the mean mse within subjects
     mse_mean_within_subject = 1 / blockaverage_mse_inv_mean_weighted
     
     blockaverage_mse_subj_tmp = blockaverage_mse_subj.copy()
@@ -315,178 +244,12 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
     blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )
     blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
 
-    #%% scalp_plot the mean, stderr and t-stat
-    # # scalp_plot the mean, stderr and t-stat
-    # ########################################################
-    # # FIXME: I will want to loop over trial types and save as separate files
-    # if 'chromo' in blockaverage_mean_weighted.dims:
-    #     n_wav_chromo = blockaverage_mean_weighted.chromo.size
-    # else:
-    #     n_wav_chromo = blockaverage_mean_weighted.wavelength.size
-
-    # for i_wav_chromo in range(n_wav_chromo):
-    #     f,ax = p.subplots(2,2,figsize=(10,10))
-
-    #     ax1 = ax[0,0]
-    #     foo_da = blockaverage_mean_weighted.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-    #     foo_da = foo_da[0,:,:]
-    #     title_str = 'Mean'
-    #     if 'chromo' in foo_da.dims:
-    #         foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-    #     else:
-    #         foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-    #     max_val = np.nanmax(np.abs(foo_da_tmp.values))
-    #     plots.scalp_plot(
-    #             rec[0][0][rec_str],
-    #             rec[0][0].geo3d,
-    #             foo_da_tmp,
-    #             ax1,
-    #             cmap='jet',
-    #             vmin=-max_val,
-    #             vmax=max_val,
-    #             optode_labels=False,
-    #             title=title_str,
-    #             optode_size=6
-    #         )
-
-    #     ax1 = ax[0,1]
-    #     foo_numer = blockaverage_mean_weighted.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-    #     foo_denom = blockaverage_stderr_weighted.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-    #     foo_da = foo_numer / foo_denom
-    #     foo_da = foo_da[0,:,:]
-    #     title_str = 'T-Stat'
-    #     if 'chromo' in foo_da.dims:
-    #         foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-    #     else:
-    #         foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-    #     max_val = np.nanmax(np.abs(foo_da_tmp.values))
-    #     plots.scalp_plot(
-    #             rec[0][0][rec_str],
-    #             rec[0][0].geo3d,
-    #             foo_da_tmp,
-    #             ax1,
-    #             cmap='jet',
-    #             vmin=-max_val,
-    #             vmax=max_val,
-    #             optode_labels=False,
-    #             title=title_str,
-    #             optode_size=6
-    #         )
-        
-    #     ax1 = ax[1,0]
-    #     foo_da = mse_mean_within_subject.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-    #     foo_da = foo_da[0,:,:]
-    #     foo_da = foo_da**0.5
-    #     title_str = 'log10(RMSE) within subjects'
-    #     if 'chromo' in foo_da.dims:
-    #         foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-    #         foo_da_tmp = foo_da_tmp.pint.dequantify()
-    #     else:
-    #         foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-    #     foo_da_tmp = np.log10(foo_da_tmp)
-    #     max_val = np.nanmax(foo_da_tmp.values)
-    #     min_val = np.nanmin(foo_da_tmp.values)
-    #     plots.scalp_plot(
-    #             rec[0][0][rec_str],
-    #             rec[0][0].geo3d,
-    #             foo_da_tmp,
-    #             ax1,
-    #             cmap='jet',
-    #             vmin=min_val,
-    #             vmax=max_val,
-    #             optode_labels=False,
-    #             title=title_str,
-    #             optode_size=6
-    #         )
-
-    #     ax1 = ax[1,1]
-    #     foo_da = mse_weighted_between_subjects.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-    #     foo_da = foo_da[0,:,:]
-    #     foo_da = foo_da**0.5
-    #     title_str = 'log10(RMSE) between subjects'
-    #     if 'chromo' in foo_da.dims:
-    #         foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-    #         foo_da_tmp = foo_da_tmp.pint.dequantify()
-    #     else:
-    #         foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-    #     foo_da_tmp = np.log10(foo_da_tmp)
-    #     max_val = np.nanmax(foo_da_tmp.values)
-    #     min_val = np.nanmin(foo_da_tmp.values)
-    #     plots.scalp_plot(
-    #             rec[0][0][rec_str],
-    #             rec[0][0].geo3d,
-    #             foo_da_tmp,
-    #             ax1,
-    #             cmap='jet',
-    #             vmin=min_val,
-    #             vmax=max_val,
-    #             optode_labels=False,
-    #             title=title_str,
-    #             optode_size=6
-    #         )
-                
-    #     # give a title to the figure and save it
-    #     dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
-    #     if 'chromo' in foo_da.dims:
-    #         title_str = f"{dirnm} - {rec_str} {foo_da.chromo.values[i_wav_chromo]} ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
-    #     else:
-    #         title_str = f"{dirnm} - {rec_str} {foo_da.wavelength.values[i_wav_chromo]:.0f}nm ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
-    #     p.suptitle(title_str)
-
-    #     if 'chromo' in foo_da.dims:
-    #         p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{foo_da.chromo.values[i_wav_chromo]}.png') )
-    #     else:
-    #         p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{foo_da.wavelength.values[i_wav_chromo]:.0f}nm.png') )
-    #     p.close()
-
-    
-    #plot the MSE histogram
-
-    # # plot the MSE histogram
-    # ########################################################
-    # n_subjects = len(rec)-len(cfg_dataset['subj_id_exclude']) # reassign n_subjects to exclude subs 
-    # f,ax = p.subplots(2,1,figsize=(6,10))
-
-    # # plot the diagonals for all subjects
-    # ax1 = ax[0]
-    # foo = blockaverage_mse_subj.mean('reltime')
-    # if 'chromo' in ts.dims:
-    #     foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
-    # else:
-    #     foo = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
-    # for i in range(n_subjects):
-    #     ax1.semilogy(foo[i,0,:], linewidth=0.5,alpha=0.5)
-    # ax1.set_title('variance in the mean for all subjects')
-    # ax1.set_xlabel('channel')
-    # ax1.legend()
-
-    # # histogram the diagonals
-    # ax1 = ax[1]
-    # foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)]) # FIXME: need to loop over files too
-    # # check if mse_val_for_bad_data has units
-    # if 'chromo' in ts.dims:
-    #     foo1 = np.where(foo1 == 0, mse_val_for_bad_data.magnitude, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
-    # else:
-    #     foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1)
-    # ax1.hist(np.log10(foo1), bins=100)
-    # if 'chromo' in ts.dims:
-    #     ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
-    # else:
-    #     ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh:.2e}')
-    # ax1.legend()
-    # ax1.set_title('histogram for all subjects of variance in the mean')
-    # ax1.set_xlabel('log10(cov_diag)')
-
-    # # give a title to the figure and save it
-    # dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
-    # p.suptitle(f'Data set - {dirnm}')
-
-    # p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_mse_histogram_{rec_str}.png') )
-    # p.close()
-    #%%
-    # Plot scalp plot and mse hist
-    plot_mean_stderr(rec, rec_str, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects)
-    #plot_mse_hist(rec, rec_str, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh)  # !!! this is not working and i dont care to debug it rn
+    #%
+    # Plot scalp plot of mean, tstat,rsme + Plot mse hist
+    for idxt, trial_type in enumerate(blockaverage_mean_weighted.trial_type.values):         
+        plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, 
+                         blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects)
+        plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh)  # !!! not sure if these r working correctly tbh
     
 
     return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_subj, blockaverage_mse_subj
@@ -494,187 +257,182 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
 
 #%% Plotting func
     
-def plot_mean_stderr(rec, rec_str, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects):
+def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects):
     # scalp_plot the mean, stderr and t-stat
-    ########################################################
-    # FIXME: I will want to loop over trial types and save as separate files
+    #######################################################
     
-    for idxt, trial_type in enumerate(blockaverage_mean_weighted.trial_type.values): 
-        
-        blockaverage_mean_weighted_t = blockaverage_mean_weighted.sel(trial_type=trial_type)
-        blockaverage_stderr_weighted_t = blockaverage_stderr_weighted.sel(trial_type=trial_type)
-        mse_mean_within_subject_t = mse_mean_within_subject.sel(trial_type=trial_type)
-        mse_weighted_between_subjects_t = mse_weighted_between_subjects.sel(trial_type=trial_type)
-        
-        if 'chromo' in blockaverage_mean_weighted_t.dims:
-            n_wav_chromo = blockaverage_mean_weighted_t.chromo.size
-        else:
-            n_wav_chromo = blockaverage_mean_weighted_t.wavelength.size
+    blockaverage_mean_weighted_t = blockaverage_mean_weighted.sel(trial_type=trial_type)
+    blockaverage_stderr_weighted_t = blockaverage_stderr_weighted.sel(trial_type=trial_type)
+    mse_mean_within_subject_t = mse_mean_within_subject.sel(trial_type=trial_type)
+    mse_weighted_between_subjects_t = mse_weighted_between_subjects.sel(trial_type=trial_type)
     
-        for i_wav_chromo in range(n_wav_chromo):
-            f,ax = p.subplots(2,2,figsize=(10,10))
-    
-            ax1 = ax[0,0]
-            foo_da = blockaverage_mean_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-            #foo_da = foo_da[0,:,:]
-            title_str = 'Mean_' + rec_str + '_' + trial_type
-            if 'chromo' in foo_da.dims:
-                foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-            else:
-                foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-            max_val = np.nanmax(np.abs(foo_da_tmp.values))
-            plots.scalp_plot(
-                    rec[0][0][rec_str],
-                    rec[0][0].geo3d,
-                    foo_da_tmp,
-                    ax1,
-                    cmap='jet',
-                    vmin=-max_val,
-                    vmax=max_val,
-                    optode_labels=False,
-                    title=title_str,
-                    optode_size=6
-                )
-    
-            ax1 = ax[0,1]
-            foo_numer = blockaverage_mean_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-            foo_denom = blockaverage_stderr_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-            foo_da = foo_numer / foo_denom
-            #foo_da = foo_da[0,:,:]
-            title_str = 'T-Stat_'+ rec_str + '_' + trial_type
-            if 'chromo' in foo_da.dims:
-                foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-            else:
-                foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-            max_val = np.nanmax(np.abs(foo_da_tmp.values))
-            plots.scalp_plot(
-                    rec[0][0][rec_str],
-                    rec[0][0].geo3d,
-                    foo_da_tmp,
-                    ax1,
-                    cmap='jet',
-                    vmin=-max_val,
-                    vmax=max_val,
-                    optode_labels=False,
-                    title=title_str,
-                    optode_size=6
-                )
-            
-            ax1 = ax[1,0]
-            foo_da = mse_mean_within_subject_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-            #foo_da = foo_da[0,:,:]
-            foo_da = foo_da**0.5
-            title_str = 'log10(RMSE) within subjects ' + rec_str + ' ' + trial_type
-            if 'chromo' in foo_da.dims:
-                foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-                foo_da_tmp = foo_da_tmp.pint.dequantify()
-            else:
-                foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-            foo_da_tmp = np.log10(foo_da_tmp)
-            max_val = np.nanmax(foo_da_tmp.values)
-            min_val = np.nanmin(foo_da_tmp.values)
-            plots.scalp_plot(
-                    rec[0][0][rec_str],
-                    rec[0][0].geo3d,
-                    foo_da_tmp,
-                    ax1,
-                    cmap='jet',
-                    vmin=min_val,
-                    vmax=max_val,
-                    optode_labels=False,
-                    title=title_str,
-                    optode_size=6
-                )
-    
-            ax1 = ax[1,1]
-            foo_da = mse_weighted_between_subjects_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
-            #foo_da = foo_da[0,:,:]
-            foo_da = foo_da**0.5
-            title_str = 'log10(RMSE) between subjects ' + rec_str + ' ' + trial_type 
-            if 'chromo' in foo_da.dims:
-                foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
-                foo_da_tmp = foo_da_tmp.pint.dequantify()
-            else:
-                foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
-            foo_da_tmp = np.log10(foo_da_tmp)
-            max_val = np.nanmax(foo_da_tmp.values)
-            min_val = np.nanmin(foo_da_tmp.values)
-            plots.scalp_plot(
-                    rec[0][0][rec_str],
-                    rec[0][0].geo3d,
-                    foo_da_tmp,
-                    ax1,
-                    cmap='jet',
-                    vmin=min_val,
-                    vmax=max_val,
-                    optode_labels=False,
-                    title=title_str,
-                    optode_size=6
-                )
-                    
-            # give a title to the figure and save it
-            dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
-            if 'chromo' in foo_da.dims:
-                title_str = f"{dirnm} - {rec_str} {trial_type} {foo_da.chromo.values[i_wav_chromo]} ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
-            else:
-                title_str = f"{dirnm} - {rec_str} {trial_type} {foo_da.wavelength.values[i_wav_chromo]:.0f}nm ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
-            p.suptitle(title_str)
-    
-            if 'chromo' in foo_da.dims:
-                p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.chromo.values[i_wav_chromo]}.png') )
-            else:
-                p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.wavelength.values[i_wav_chromo]:.0f}nm.png') )
-            p.close()
+    if 'chromo' in blockaverage_mean_weighted_t.dims:
+        n_wav_chromo = blockaverage_mean_weighted_t.chromo.size
+    else:
+        n_wav_chromo = blockaverage_mean_weighted_t.wavelength.size
 
+    for i_wav_chromo in range(n_wav_chromo):
+        f,ax = p.subplots(2,2,figsize=(10,10))
 
-def plot_mse_hist(rec, rec_str, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh):
-    # plot the MSE histogram
-    ########################################################
-    
-    for idxt, trial_type in enumerate(blockaverage_mse_subj.trial_type.values): 
-        
-        blockaverage_mse_subj_t = blockaverage_mse_subj.sel(trial_type = trial_type)
-        
-        n_subjects = len(rec)-len(cfg_dataset['subj_id_exclude']) # reassign n_subjects to exclude subs 
-        f,ax = p.subplots(2,1,figsize=(6,10))
-    
-        # plot the diagonals for all subjects
-        ax1 = ax[0]
-        foo = blockaverage_mse_subj_t.mean('reltime')
-        
-        if 'chromo' in rec[0][0][rec_str].dims:
-            foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+        ax1 = ax[0,0]
+        foo_da = blockaverage_mean_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
+        #foo_da = foo_da[0,:,:]
+        title_str = 'Mean_' + rec_str + '_' + trial_type
+        if 'chromo' in foo_da.dims:
+            foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
         else:
-            foo = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
-        for i in range(n_subjects):
-            ax1.semilogy(foo[i,:], linewidth=0.5,alpha=0.5)
-        ax1.set_title('variance in the mean for all subjects')
-        ax1.set_xlabel('channel')
-        ax1.legend()
-    
-        # histogram the diagonals
-        ax1 = ax[1]
-        foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)]) # FIXME: need to loop over files too
-        # check if mse_val_for_bad_data has units
-        if 'chromo' in rec[0][0][rec_str].dims:
-            foo1 = np.where(foo1 == 0, mse_val_for_bad_data.magnitude, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
+            foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
+        max_val = np.nanmax(np.abs(foo_da_tmp.values))
+        plots.scalp_plot(
+                rec[0][0][rec_str],
+                rec[0][0].geo3d,
+                foo_da_tmp,
+                ax1,
+                cmap='jet',
+                vmin=-max_val,
+                vmax=max_val,
+                optode_labels=False,
+                title=title_str,
+                optode_size=6
+            )
+
+        ax1 = ax[0,1]
+        foo_numer = blockaverage_mean_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
+        foo_denom = blockaverage_stderr_weighted_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
+        foo_da = foo_numer / foo_denom
+        #foo_da = foo_da[0,:,:]
+        title_str = 'T-Stat_'+ rec_str + '_' + trial_type
+        if 'chromo' in foo_da.dims:
+            foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
         else:
-            foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1)
-        ax1.hist(np.log10(foo1), bins=100)
-        if 'chromo' in rec[0][0][rec_str].dims:
-            ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
+            foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
+        max_val = np.nanmax(np.abs(foo_da_tmp.values))
+        plots.scalp_plot(
+                rec[0][0][rec_str],
+                rec[0][0].geo3d,
+                foo_da_tmp,
+                ax1,
+                cmap='jet',
+                vmin=-max_val,
+                vmax=max_val,
+                optode_labels=False,
+                title=title_str,
+                optode_size=6
+            )
+        
+        ax1 = ax[1,0]
+        foo_da = mse_mean_within_subject_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
+        #foo_da = foo_da[0,:,:]
+        foo_da = foo_da**0.5
+        title_str = 'log10(RMSE) within subjects ' + rec_str + ' ' + trial_type
+        if 'chromo' in foo_da.dims:
+            foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
+            foo_da_tmp = foo_da_tmp.pint.dequantify()
         else:
-            ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh:.2e}')
-        ax1.legend()
-        ax1.set_title(f'{rec_str} {trial_type} - histogram for all subjects of variance in the mean')
-        ax1.set_xlabel('log10(cov_diag)')
-    
+            foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
+        foo_da_tmp = np.log10(foo_da_tmp)
+        max_val = np.nanmax(foo_da_tmp.values)
+        min_val = np.nanmin(foo_da_tmp.values)
+        plots.scalp_plot(
+                rec[0][0][rec_str],
+                rec[0][0].geo3d,
+                foo_da_tmp,
+                ax1,
+                cmap='jet',
+                vmin=min_val,
+                vmax=max_val,
+                optode_labels=False,
+                title=title_str,
+                optode_size=6
+            )
+
+        ax1 = ax[1,1]
+        foo_da = mse_weighted_between_subjects_t.sel(reltime=slice(cfg_blockavg['trange_hrf_stat'][0], cfg_blockavg['trange_hrf_stat'][1])).mean('reltime')
+        #foo_da = foo_da[0,:,:]
+        foo_da = foo_da**0.5
+        title_str = 'log10(RMSE) between subjects ' + rec_str + ' ' + trial_type 
+        if 'chromo' in foo_da.dims:
+            foo_da_tmp = foo_da.isel(chromo=i_wav_chromo)
+            foo_da_tmp = foo_da_tmp.pint.dequantify()
+        else:
+            foo_da_tmp = foo_da.isel(wavelength=i_wav_chromo)
+        foo_da_tmp = np.log10(foo_da_tmp)
+        max_val = np.nanmax(foo_da_tmp.values)
+        min_val = np.nanmin(foo_da_tmp.values)
+        plots.scalp_plot(
+                rec[0][0][rec_str],
+                rec[0][0].geo3d,
+                foo_da_tmp,
+                ax1,
+                cmap='jet',
+                vmin=min_val,
+                vmax=max_val,
+                optode_labels=False,
+                title=title_str,
+                optode_size=6
+            )
+                
         # give a title to the figure and save it
         dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
-        p.suptitle(f'Data set - {dirnm}')
-    
-        p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_mse_histogram_{rec_str}_{trial_type}.png') )
+        if 'chromo' in foo_da.dims:
+            title_str = f"{dirnm} - {rec_str} {trial_type} {foo_da.chromo.values[i_wav_chromo]} ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
+        else:
+            title_str = f"{dirnm} - {rec_str} {trial_type} {foo_da.wavelength.values[i_wav_chromo]:.0f}nm ({cfg_blockavg['trange_hrf_stat'][0]} to {cfg_blockavg['trange_hrf_stat'][1]} s)"
+        p.suptitle(title_str)
+
+        if 'chromo' in foo_da.dims:
+            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.chromo.values[i_wav_chromo]}.png') )
+        else:
+            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.wavelength.values[i_wav_chromo]:.0f}nm.png') )
         p.close()
+
+
+def plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh):
+    # plot the MSE histogram
+    ########################################################
+
+    blockaverage_mse_subj_t = blockaverage_mse_subj.sel(trial_type = trial_type)
+    
+    n_subjects = len(rec)  
+    f,ax = p.subplots(2,1,figsize=(6,10))
+
+    # plot the diagonals for all subjects
+    ax1 = ax[0]
+    foo = blockaverage_mse_subj_t.mean('reltime')
+    
+    if 'chromo' in rec[0][0][rec_str].dims:
+        foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+    else:
+        foo = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
+    for i in range(n_subjects):
+        ax1.semilogy(foo[i,:], linewidth=0.5,alpha=0.5)
+    ax1.set_title('variance in the mean for all subjects')
+    ax1.set_xlabel('channel')
+    ax1.legend()
+
+    # histogram the diagonals
+    ax1 = ax[1]
+    foo1 = np.concatenate([foo[i] for i in range(n_subjects)]) # FIXME: need to loop over files too   # was foo[i][0] not sure what [0] was for, maybe trial type?
+    # check if mse_val_for_bad_data has units
+    if 'chromo' in rec[0][0][rec_str].dims:
+        foo1 = np.where(foo1 == 0, mse_val_for_bad_data.magnitude, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
+    else:
+        foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1)
+    ax1.hist(np.log10(foo1), bins=100)
+    if 'chromo' in rec[0][0][rec_str].dims:
+        ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
+    else:
+        ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh:.2e}')
+    ax1.legend()
+    ax1.set_title(f'{rec_str} {trial_type} - histogram for all subjects of variance in the mean')
+    ax1.set_xlabel('log10(cov_diag)')
+
+    # give a title to the figure and save it
+    dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
+    p.suptitle(f'Data set - {dirnm}')
+
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_mse_histogram_{rec_str}_{trial_type}.png') )
+    p.close()
 
 
 #%% Old funcs -- not using

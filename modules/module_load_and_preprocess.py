@@ -67,13 +67,19 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
 
-
+    subj_ids = cfg_dataset['subj_ids']
     n_subjects = len(cfg_dataset['subj_ids'])
     n_files_per_subject = len(cfg_dataset['file_ids'])
+    
+    n_subjects_corrected =  len(cfg_dataset['subj_ids']) - len(cfg_dataset['subj_id_exclude'])
 
     # loop over subjects and files
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
+            
+            if subj_ids[subj_idx] in cfg_dataset['subj_id_exclude']:  # if current subj is excluded then skip processing
+                print(f'Subject {subj_ids[subj_idx]} listed in subj_id_exclude. Skipping processing for this subject.')    
+                continue 
             
             filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
             
@@ -90,7 +96,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
             foo = file_path[:-5] + '_events.tsv'
             # check if the events.tsv file exists
-            if not os.path.exists( foo ):
+            if not os.path.exists( foo ):  # !!! assert?
                 print( f"Error: File {foo} does not exist" )
             else:
                 stim_df = pd.read_csv( file_path[:-5] + '_events.tsv', sep='\t' )
@@ -100,7 +106,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
                 
                 # Check if walking condition exists in rec.stim, if no then sets flag_do_imu_glm to false
-                if not recTmp.stim.isin(["start_walk"]).any().any():   # !!! ADD end walk, start stand and end stand
+                if not recTmp.stim.isin(["start_walk", "end_walk"]).any().any():
                     cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
                     print("No walking condition found in events.tsv. Skipping imu glm filtering step.")
                     
@@ -129,6 +135,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             
             # Walking filter
             if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']: 
+                print('Starting imu glm filtering step on walking portion of data.')
                 recTmp["od_corrected"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
                 
             # Get the slope of 'od' before motion correction and any bandpass filtering
@@ -154,7 +161,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             slope_corrected = quant_slope(recTmp, "od_corrected", False)  
             
             
-            # GVTD for TDDR before bandpass filtering
+            # GVTD for Corrected od before bandpass filtering
             amp_corrected = recTmp['od_corrected'].copy()  
             amp_corrected.values = np.exp(-amp_corrected.values)
             amp_corrected_masked = prune_mask_ts(amp_corrected, pruned_chans)  # get "pruned" amp data post tddr
@@ -195,7 +202,10 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
             
             pfDAB_dqr.plotDQR( recTmp, chs_pruned, cfg_preprocess, filenm, cfg_dataset['root_dir'], cfg_dataset['cfg_hrf']['stim_lst'] )
-            # !!! make slope sep DQR plot
+            
+            # Plot slope before and after MA
+            if cfg_preprocess['cfg_motion_correct']['flag_do_tddr']:
+                pfDAB_dqr.plot_slope(recTmp, [slope_base, slope_corrected], cfg_preprocess, filenm, cfg_dataset['root_dir'])
 
             # load the sidecar json file 
             if os.path.exists(file_path + '.json'):
@@ -248,50 +258,14 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
     # End of subject loop
 
     # plot the group DQR
-    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], rec, cfg_dataset['root_dir'], flag_plot=False )
+    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], cfg_dataset['subj_id_exclude'], rec, cfg_dataset['root_dir'], flag_plot=False )
+    # !!! plot_group_dqr will fail if no tddr ?
 
     
     return rec, chs_pruned_subjs
 
 
 #%%
-
-
-# def preprocess_post_ma_corr(recTmp, p_rec_str, cfg_dataset, cfg_preprocess, filenm, ):
-
-#     # Get slopes after TDDR before bandpass filtering
-#     slope_ma = quant_slope(recTmp, f'od_{p_rec_str}', False)
-    
-    
-#     # GVTD for TDDR before bandpass filtering
-#     amp_ma = recTmp[f'od_{p_rec_str}'].copy()
-#     amp_ma.values = np.exp(-amp_ma.values)
-#     recTmp.aux_ts[f'gvtd_{p_rec_str}'], _ = quality.gvtd(amp_ma)
-    
-    
-#     # bandpass filter od_tddr
-#     fmin = cfg_preprocess['cfg_bandpass']['fmin']
-#     fmax = cfg_preprocess['cfg_bandpass']['fmax']
-#     recTmp[f'od_{p_rec_str}'] = cedalion.sigproc.frequency.freq_filter(recTmp[f'od_{p_rec_str}'], fmin, fmax)
-    
-
-#     # Convert OD to Conc
-#     dpf = xr.DataArray(
-#         [1, 1],
-#         dims="wavelength",
-#         coords={"wavelength": recTmp['amp'].wavelength},
-#     )
-    
-#     # Convert to conc Conc
-#     recTmp[f'conc_{p_rec_str}'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
-    
-#     # GLM filtering step
-#     if cfg_preprocess['flag_do_GLM_filter']:
-#         recTmp = GLM(recTmp, f'conc_{p_rec_str}', cfg_preprocess['cfg_GLM'])
-        
-#         recTmp[f'od_{p_rec_str}_postglm'] = cedalion.nirs.conc2od(recTmp[f'conc_{p_rec_str}'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
-        
-#     return recTmp
 
 def prune_mask_ts(ts, channels_to_nan):
     '''
