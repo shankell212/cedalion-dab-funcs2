@@ -14,6 +14,7 @@ path2results = "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/deriv
 
 fileName = "blockaverage_STS_OD.pkl.gz"
 
+
 #
 # does blockaverage.pkl.gz exist in the current directory?
 if os.path.exists('blockaverage.pkl.gz'):

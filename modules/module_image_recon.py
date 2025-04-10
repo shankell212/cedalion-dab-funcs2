@@ -64,7 +64,7 @@ def load_head_model(head_model='ICBM152', with_parcels=True):
 
 def load_probe(probe_path, snirf_name ='fullhead_56x144_System2_4NN.snirf', head_model='ICBM152'):
         
-    with open(os.path.join(probe_path, 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
+    with open(os.path.join(probe_path, 'fw',  head_model, 'Adot.pkl'), 'rb') as f:
         Adot = pickle.load(f)
         
     recordings = io.read_snirf(probe_path + snirf_name)
@@ -449,7 +449,7 @@ def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
     # with open(os.path.join(path_to_dataset, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
     #     Adot = pickle.load(f)
     
-    file_path = os.path.join(path_to_dataset, head_model, 'Adot_wParcels.pkl')
+    file_path = os.path.join(path_to_dataset, head_model, 'Adot.pkl')
     with open(file_path, 'rb') as f:
         Adot = pickle.load(f) 
         
@@ -488,7 +488,7 @@ def do_image_recon_DB( hrf_od = None, head = None, Adot = None, C_meas = None, w
     #
     # prune the data and sensitivity profile
     #
-
+    #pdb.set_trace()
     # FIXME: I am checking both wavelengths since I have to prune both if one is null to get consistency between A_pruned and od_mag_pruned
     #        We don't have to technically do this, but it is easier. The alternative requires have Adot_pruned for each wavelengths and checking rest of code
     wav = hrf_od.wavelength.values
@@ -633,24 +633,24 @@ def do_image_recon_DB( hrf_od = None, head = None, Adot = None, C_meas = None, w
     else:
         f = max(np.diag(C))
 
-        alpha_meas = cfg_img_recon['alpha_meas']
-        print(f'   Doing image recon with alpha_meas = {alpha_meas}')
-        if cfg_img_recon['BRAIN_ONLY'] and W is None:
-            Adot_stacked = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
-            W = pseudo_inverse_stacked(Adot_stacked, alpha=alpha_meas)
-            W = W.assign_coords({"chromo" : ("flat_vertex", ["HbO"]*nvertices  + ["HbR"]* nvertices)})
-            W = W.set_xindex("chromo")
-        elif W is None:
-            if C_meas is None:
-                lambda_meas = alpha_meas * f 
-                W = D @ np.linalg.inv(C  + lambda_meas * np.eye(A.shape[0]) )
+    alpha_meas = cfg_img_recon['alpha_meas']
+    print(f'   Doing image recon with alpha_meas = {alpha_meas}')
+    if cfg_img_recon['BRAIN_ONLY'] and W is None:
+        Adot_stacked = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
+        W = pseudo_inverse_stacked(Adot_stacked, alpha=alpha_meas)
+        W = W.assign_coords({"chromo" : ("flat_vertex", ["HbO"]*nvertices  + ["HbR"]* nvertices)})
+        W = W.set_xindex("chromo")
+    elif W is None:
+        if C_meas is None:
+            lambda_meas = alpha_meas * f 
+            W = D @ np.linalg.inv(C  + lambda_meas * np.eye(A.shape[0]) )
+        else:
+            lambda_meas = alpha_meas * f
+            # check if C_meas has 2 dimensions
+            if len(C_meas.shape) == 2:
+                W = D @ np.linalg.inv(C + lambda_meas * C_meas)
             else:
-                lambda_meas = alpha_meas * f
-                # check if C_meas has 2 dimensions
-                if len(C_meas.shape) == 2:
-                    W = D @ np.linalg.inv(C + lambda_meas * C_meas)
-                else:
-                    W = D @ np.linalg.inv(C + lambda_meas * np.diag(C_meas))
+                W = D @ np.linalg.inv(C + lambda_meas * np.diag(C_meas))
             nvertices = W.shape[0]//2
         
             #% GENERATE IMAGES FOR DIFFERENT IMAGE PARAMETERS AND ALSO FOR THE FULL TIMESERIES
@@ -859,28 +859,32 @@ def plot_image_recon( X, head, shape, iax,clim=(0,1), flag_hbx='hbo_brain', view
     if flag_hbx == 'hbo_brain': # hbo brain 
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        clim=(-0.7*X_hbo_brain.max(), 0.7*X_hbo_brain.max())
+        #clim=(-X_hbo_brain.max(), X_hbo_brain.max())
         p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_brain': # hbr brain
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)   
-        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        clim=(-0.7*X_hbr_brain.max(), 0.7*X_hbr_brain.max())
+        #clim=(-X_hbr_brain.max(), X_hbr_brain.max())
         p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbo_scalp': # hbo scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        clim=(-0.7*X_hbo_brain.max(), 0.7*X_hbo_brain.max())
+        #clim=(-X_hbo_brain.max(), X_hbo_brain.max())
         p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_scalp': # hbr scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        clim=(-0.7*X_hbr_brain.max(), 0.7*X_hbr_brain.max())
+        #clim=(-X_hbr_brain.max(), X_hbr_brain.max())
         p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 

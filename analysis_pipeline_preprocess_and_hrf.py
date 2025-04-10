@@ -22,9 +22,8 @@ import pickle
 import json
 
 
-# import my own functions from a different directory
+# import functions from a different directory
 import sys
-#sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
 import module_load_and_preprocess as pfDAB
 import module_plot_DQR as pfDAB_dqr
@@ -39,6 +38,22 @@ import warnings
 warnings.filterwarnings('ignore')
 
 import pyvista as pv
+
+
+#%% Notes
+# DQR plot - 
+    # add legend for what each color represents 
+    # relabel ticks on color bar
+    # requires change scalp plot code?
+    # david will add changing labels to scalp plot in cedalion
+    
+    # in future save pruned channel / other dqr quantitative values in a csv file 
+        # will decide what to save as a group 
+        
+# save cfgs in json (already doing) & load it into down stream processing (img recon) 
+    # will b .yml in future
+    
+
 # %% 
 ##############################################################################
 import importlib
@@ -89,10 +104,10 @@ cfg_prune = {
 cfg_imu_glm = {'statesPerDataFrame' : 89,   # FOR WALKING DATA
 		'hWin' : np.arange(-3,5,1), # window for impulse response function 
 		'statesPerDataFrame' : 89,
-		'n_components' : [3, 2],  # [gyro, accel]       # !!! note: changing this will change fig sizes - add that in?
+		'n_components' : [3, 2],  # [gyro, accel]       # !!! note: changing this will change fig sizes 
         'butter_order' : 4,   # butterworth filter order
         'Fc' : 0.1,   # cutoff freq (Hz)
-        'plot_flag_imu' : True  
+        'plot_flag_imu' : True  # !!! remove and just always save plots
 }
 
 cfg_motion_correct = {
@@ -100,17 +115,18 @@ cfg_motion_correct = {
     #'splineSG_p' : 0.99, 
     #'splineSG_frame_size' : 10 * units.s,
     'flag_do_tddr' : True,  
-    'flag_do_imu_glm' : True,
+    'flag_do_imu_glm' : True,   # only for walking data
     'cfg_imu_glm' : cfg_imu_glm,
 }
 
 cfg_bandpass = { 
+    'flag_bandpass_filter' : True,
     'fmin' : 0.01 * units.Hz, #0.02 * units.Hz,
     'fmax' : 0.5 * units.Hz  #3 * units.Hz
 }
 
 
-cfg_GLM = {
+cfg_GLM = {    # this is a "filter," - we are getting HRFs from block average
     'drift_order' : 1,
     'distance_threshold' : 20 *units.mm, # for ssr
     'short_channel_method' : 'mean',
@@ -123,11 +139,12 @@ cfg_GLM = {
 
 cfg_preprocess = {
     'flag_prune_channels' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
+    'flag_do_GLM_filter' : True,
+    'flag_save_preprocessed_data' : True,
     'median_filt' : 1, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
     'cfg_bandpass' : cfg_bandpass,
-    'flag_do_GLM_filter' : True,
     'cfg_GLM' : cfg_GLM 
 }
 
@@ -148,12 +165,12 @@ cfg_mse_od = {
     }
 
 cfg_blockavg = {
-    'rec_str' : 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
+    'rec_str' :  'conc',  # 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
     'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
     'cfg_hrf' : cfg_hrf,
     'trange_hrf_stat' : [10, 20],  
-    'flag_save_group_avg_hrf': False,
-    'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
+    'flag_save_block_avg_hrf': True,
+    'flag_save_each_subj' : False,  # !!! do we need this?  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
     }               
@@ -165,7 +182,6 @@ cfg_erbmICA = {}
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
 
 flag_load_preprocessed_data = True  
-flag_save_preprocessed_data = False   # SAVE or no save
 
 flag_load_blockaveraged_data = False
 
@@ -224,7 +240,7 @@ if not flag_load_preprocessed_data:
 
     
     # SAVE preprocessed data 
-    if flag_save_preprocessed_data:
+    if cfg_preprocess['flag_save_preprocessed_data']:
         print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
                                      'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
@@ -236,19 +252,27 @@ if not flag_load_preprocessed_data:
             
             
         # SAVE cfg params to json file
-        # !!! ADD image recon cfg  ?? - or make it its own .json since i am planning to separate into 2 scripts
-        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, 
+                         "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
         
-        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.json'
-            
-        with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
+        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str
+        save_json_path = os.path.join(save_path, cfg_save_str + '.json')
+        save_pickle_path = os.path.join(save_path, cfg_save_str + '.pkl')
+                
+        # Save configs as json to view outside of python
+        with open(os.path.join(save_json_path), "w", encoding="utf-8") as f:
             json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
+
+        # Save configs as Pickle for Python usage (preserving complex objects like Pint quantities)
+        with open(save_pickle_path, "wb") as f:
+            pickle.dump(dict_cfg_save, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("Preprocessed data successfully saved.")
+
         
         
 # LOAD IN SAVED DATA
 else:
-    print("Loading saved data")   # !!! update with new naming for pruned or unpruned above
+    print("Loading saved data")   
     with gzip.open( os.path.join(save_path, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
          rec = pickle.load(f)
     with gzip.open( os.path.join(save_path, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f:
@@ -329,15 +353,15 @@ if not flag_load_blockaveraged_data:
     else:    # if not pruning, save weighted blockaverage data
         _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     
-    groupavg_results = {'blockaverage': blockaverage_mean,
+    groupavg_results = {'blockaverage': blockaverage_mean, # group_blockaverage  rename
                'blockaverage_stderr': blockaverage_stderr,
-               'blockaverage_subj': blockaverage_subj,
-               'blockaverage_mse_subj': blockaverage_mse_subj,
+               'blockaverage_subj': blockaverage_subj,  # always unweighted   - load into img recon
+               'blockaverage_mse_subj': blockaverage_mse_subj, # - load into img recon
                'geo2d' : rec[0][0].geo2d,
                'geo3d' : rec[0][0].geo3d
                }
     
-    if cfg_blockavg['flag_save_group_avg_hrf']:
+    if cfg_blockavg['flag_save_block_avg_hrf']:
         file_path_pkl = os.path.join(save_path, 'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + save_str + '.pkl.gz')
         file = gzip.GzipFile(file_path_pkl, 'wb')
         file.write(pickle.dumps(groupavg_results))

@@ -153,12 +153,13 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     recTmp['od_corrected'] = motion_correct.tddr( recTmp['od_corrected'] )  
                 else:   # do tddr on uncorrected od
                     recTmp['od_corrected'] = motion_correct.tddr( recTmp['od'] )  
+                slope_corrected = quant_slope(recTmp, "od_corrected", False)  # Get slopes after correction before bandpass filtering
             else:
                 if 'od_corrected' not in recTmp.timeseries.keys():
                     recTmp['od_corrected'] = recTmp['od']
+                    slope_corrected = quant_slope(recTmp, "od_corrected", True)  # Get slopes after correction before bandpass filtering
             
-            # Get slopes after TDDR before bandpass filtering
-            slope_corrected = quant_slope(recTmp, "od_corrected", False)  
+            #slope_corrected = quant_slope(recTmp, "od_corrected", False)  # Get slopes after correction before bandpass filtering
             
             
             # GVTD for Corrected od before bandpass filtering
@@ -169,10 +170,11 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             
             
             # Bandpass filter od_tddr
-            fmin = cfg_preprocess['cfg_bandpass']['fmin']
-            fmax = cfg_preprocess['cfg_bandpass']['fmax']
-            recTmp['od_corrected'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_corrected'], fmin, fmax)  
-            
+            if cfg_preprocess['cfg_bandpass']['flag_bandpass_filter']:
+                recTmp['od_corrected'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_corrected'], 
+                                                                                cfg_preprocess['cfg_bandpass']['fmin'], 
+                                                                                cfg_preprocess['cfg_bandpass']['fmax'])  
+                
             # Convert OD to Conc
             dpf = xr.DataArray(
                 [1, 1],
@@ -207,15 +209,16 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             if cfg_preprocess['cfg_motion_correct']['flag_do_tddr']:
                 pfDAB_dqr.plot_slope(recTmp, [slope_base, slope_corrected], cfg_preprocess, filenm, cfg_dataset['root_dir'])
 
-            # load the sidecar json file 
-            if os.path.exists(file_path + '.json'):
-                with open(file_path + '.json') as json_file:
-                    file_json = json.load(json_file)
-                if 'dataSDWP_LowHigh' in file_json:
-                    pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, cfg_dataset['root_dir'], filenm )
+            # !!! update this code adn the func in DQR
+            # # load the sidecar json file 
+            # if os.path.exists(file_path + '.json'):
+            #     with open(file_path + '.json') as json_file:
+            #         file_json = json.load(json_file)
+            #     if 'dataSDWP_LowHigh' in file_json:
+            #         pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, cfg_dataset['root_dir'], filenm )
 
-            snr0 = np.nanmedian(snr0.values)
-            snr1 = np.nanmedian(snr1.values)
+            # snr0 = np.nanmedian(snr0.values)
+            # snr1 = np.nanmedian(snr1.values)
 
 
             #
@@ -337,23 +340,23 @@ def pruneChannels( rec, cfg_prune ):
     chs_pruned = xr.DataArray(np.zeros(rec['amp'].shape[0]), dims=["channel"], coords={"channel": rec['amp'].channel})
 
     #i initialize chs_pruned to 0.4
-    chs_pruned[:] = 0.4
+    chs_pruned[:] = 0.58      # good snr   # was 0.4
 
     # get indices for where snr_mask = false
     snr_mask_false = np.where(snr_mask == False)[0]
-    chs_pruned[snr_mask_false] = 0.19 # poor snrf channels
+    chs_pruned[snr_mask_false] = 0.4 # poor snr channels      # was 0.19
 
     # get indices for where amp_mask_sat = false
     amp_mask_false = np.where(amp_mask_sat == False)[0]
-    chs_pruned[amp_mask_false] = 0.0 # saturated channels
+    chs_pruned[amp_mask_false] = 0.92 # saturated channels  # was 0.0
 
     # get indices for where amp_mask_low = false
     amp_mask_false = np.where(amp_mask_low == False)[0]
-    chs_pruned[amp_mask_false] = 0.8 # low signal channels
+    chs_pruned[amp_mask_false] = 0.24  # low signal channels    # was 0.8
 
     # get indices for where sd_mask = false
     sd_mask_false = np.where(sd_mask == False)[0]
-    chs_pruned[sd_mask_false] = 0.65 # SDS channels
+    chs_pruned[sd_mask_false] = 0.08 # SDS channels    # was 0.65
 
 
     # put all masks in a list
@@ -400,7 +403,7 @@ def pruneChannels( rec, cfg_prune ):
     rec['amp_pruned'] = perc_time_pruned
 
     # modify xarray of channel labels with value of 0.95 for channels that are pruned by SCI and/or PSP
-    chs_pruned.loc[drop_list] = 0.95
+    chs_pruned.loc[drop_list] = 0.76     # was 0.95
 
     return rec, chs_pruned, sci, psp
 
