@@ -42,14 +42,37 @@ import pyvista as pv
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
-# !!! LOAD in cfgs saved from prev code
-cfg_dataset = {  # !!! NOTE: this needs to be the same as what was used for preproc and blockavg
-    'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
-    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19'], 
-    'file_ids' : ['STS_run-01'],
-    'subj_id_exclude' : ['10', '15', '16', '17'] # if you want to exclude a subject from the group average
-}
+# Load in cfg pickle file
+
+cfg_pkl_name = "cfg_params_STS_tddr_GLMfilt_unpruned.pkl" # STS
+cfg_pkl_name = "cfg_params_IWHD_imuGLM_tddr_GLMfilt_unpruned.pkl"  # IWHD
+
+cfg_filepath = os.path.join("/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/", cfg_pkl_name) 
+
+# Open the file in binary read mode and load its contents
+with open(cfg_filepath, 'rb') as file:
+    cfg_params = pickle.load(file)
+
+cfg_hrf = cfg_params["cfg_hrf"]
+cfg_dataset = cfg_params["cfg_dataset"]
+cfg_GLM = cfg_params["cfg_GLM"]
+cfg_preprocess = cfg_params["cfg_preprocess"]
+cfg_blockavg = cfg_params["cfg_blockavg"]
+cfg_motion_correct = cfg_preprocess["cfg_motion_correct"]
+
+
 subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
+
+
+
+#%%
+# cfg_dataset = {  # !!! NOTE: this needs to be the same as what was used for preproc and blockavg
+#     'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
+#     'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19'], 
+#     'file_ids' : ['STS_run-01'],
+#     'subj_id_exclude' : ['10', '15', '16', '17'] # if you want to exclude a subject from the group average
+# }
+# subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
 
 
 cfg_sb = {
@@ -82,17 +105,37 @@ mse_min_thresh = 1e-3
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
 
 # !!! SAVE image recon configs in another json 
+# !!! ADD flag for if doing image recon on ts or hrf mag ?
+
 
 #%% Load Saved data
 
-#save_str = '_imuGLM_tddr_GLMfilt_unpruned_OD'
-#filname =  'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz'
+# File naming stuff
+p_save_str = ''
+if cfg_motion_correct['flag_do_imu_glm']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_imuGLM' 
+else:
+    p_save_str =  p_save_str
+if cfg_motion_correct['flag_do_tddr']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_tddr' 
+else:
+    p_save_str =  p_save_str 
+if cfg_preprocess['flag_do_GLM_filter']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_GLMfilt' 
+else:
+    p_save_str =  p_save_str   
+if cfg_preprocess['flag_prune_channels']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_pruned' 
+else:
+    p_save_str =  p_save_str + '_unpruned' 
+
+p_save_str =  p_save_str + '_OD' 
+
+filname =  'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl.gz'
 
 print("Loading saved data")
-#filname = 	'blockaverage_IWHD_imuGLM_tddr_GLMfilt_unpruned_OD.pkl.gz'
-filname = 	'blockaverage_STS_tddr_GLMfilt_unpruned_OD.pkl.gz'    
+
 filepath_bl = os.path.join(save_path , filname) 
-    
 if os.path.exists(filepath_bl):
     with gzip.open(filepath_bl, 'rb') as f:
         groupavg_results = pickle.load(f)
@@ -102,16 +145,12 @@ if os.path.exists(filepath_bl):
     blockaverage_mse_subj = groupavg_results['blockaverage_mse_subj']
     geo2d = groupavg_results['geo2d']
     geo3d = groupavg_results['geo3d']
-    print("Blockaverage file loaded successfully!")
+    print(f" {filname} loaded successfully!")
 
 else:
     print(f"Error: File '{filepath_bl}' not found!")
         
 blockaverage_all = blockaverage_mean.copy()
-
-
-# !!! add flag for if doing image recon on group avg or direct or indirect
-# !!! ADD flag for if doing image recon on ts or hrf mag ?
 
 
 #%% load head model 
@@ -291,6 +330,7 @@ if not os.path.exists(der_dir):
 #     file.close()     
 # else:
     
+# Save results
 filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
 print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
 file = gzip.GzipFile(filepath, 'wb')
@@ -302,6 +342,30 @@ file.close()
     # X_mse is standard error^2 
     # X_tstat = magnitude of sqrt root divided by X_mse
 
+
+
+#%% Save image configs in pickle and json file
+
+
+fil_name = f'_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz'
+# SAVE cfg params to json file
+dict_cfg_save = {"cfg_sb": cfg_sb, "cfg_img_recon" : cfg_img_recon}
+
+cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + fil_name
+save_json_path = os.path.join(save_path, cfg_save_str + '.json')
+save_pickle_path = os.path.join(save_path, cfg_save_str + '.pkl')
+
+ 
+# Save configs as json to view outside of python
+with open(os.path.join(save_json_path), "w", encoding="utf-8") as f:
+    json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
+
+# Save configs as Pickle for Python usage (preserving complex objects like Pint quantities)
+with open(save_pickle_path, "wb") as f:
+    pickle.dump(dict_cfg_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+    
+print(f'  Saving config parameters to {cfg_save_str}')
+    
 #%% build plots 
 import importlib
 importlib.reload(img_recon)

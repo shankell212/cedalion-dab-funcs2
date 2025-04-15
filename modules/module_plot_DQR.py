@@ -53,16 +53,13 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
     # Plot the pruned channels
     #
     # create cmap
-    #colors = ['red', (1,0.9,0.4), (0.3, 1, 0.3), 'cyan', 'blue', 'magenta']  # Change these colors if needed
     
     colors = ['cyan', 'blue', (1,0.9,0.4), (0.3, 1, 0.3), 'magenta', 'red']  # Change these colors if needed
     bounds = [0, 0.16, 0.32, 0.48, 0.68, 0.84, 1]
     
     cmap = clrs.ListedColormap(colors)
     norm = clrs.BoundaryNorm(bounds, cmap.N)
-    
-    #cb_ticks_labels = [(0.1,'SDS'), (0.3,'Low Signal'), (0.42,'Poor SNR'), (0.6,'Good SNR'), (0.76,'SCI/PSP'), (0.92,'Saturated')]
-    
+        
     cb_ticks_labels = [(0.08,'SDS'), (0.24,'Low Signal'), (0.4,'Poor SNR'), (0.58,'Good SNR'), (0.76,'SCI/PSP'), (0.92,'Saturated')]
 
     idx_good = np.where(chs_pruned.values == 0.58)[0]
