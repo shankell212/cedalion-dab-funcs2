@@ -20,8 +20,10 @@ from scipy.signal.windows import gaussian
 import pdb
 
 
-def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None, filepath = None, stim_lst_str = None ):
+def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None, cfg_dataset = None):
 
+    stim_lst_str = cfg_dataset['cfg_hrf']['stim_lst']
+    
     f, ax = p.subplots(3, 2, figsize=(11, 14))
     
     #
@@ -182,7 +184,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
     
     p.suptitle(fig_title)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', fig_title + "_DQR.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'],'plots', 'DQR', fig_title + "_DQR.png") )
     p.close()
 
     
@@ -201,13 +203,13 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
     
     # GVTD plots
     if 'gvtd_corrected' in rec.aux_ts.keys():
-        der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'gvtd')
+        der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', 'gvtd')
         if not os.path.exists(der_dir):
             os.makedirs(der_dir)
         
         thresh_b4, thresh_corrected = make_gvtd_hist_compare_corrected(rec.aux_ts['gvtd'], rec.aux_ts['gvtd_corrected'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
         p.suptitle(filenm)
-        p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR','gvtd', fig_title + "_DQR_gvtd_hist_compare.png") )
+        p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR','gvtd', fig_title + "_DQR_gvtd_hist_compare.png") )
         p.close()
     
 
@@ -360,11 +362,11 @@ def make_gvtd_hist(gvtd_time_trace, plot_thresh=True, stat_type=None, n_std=None
 
 
 
-def plot_slope(rec = None, slope = None, cfg_preprocess=None, filenm = None, filepath = None):
+def plot_slope(rec = None, slope = None, cfg_preprocess=None, filenm = None, cfg_dataset = None):
     '''
     Plot slope before and after correction on a scalp plot.
     '''
-    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'motion')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', 'slope')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
     
@@ -422,7 +424,7 @@ def plot_slope(rec = None, slope = None, cfg_preprocess=None, filenm = None, fil
     
     p.suptitle(fig_title)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'motion', fig_title + "_slope.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', 'slope', fig_title + "_slope.png") )
     p.close()
     
     return
@@ -430,7 +432,7 @@ def plot_slope(rec = None, slope = None, cfg_preprocess=None, filenm = None, fil
     
     
 
-def plotDQR_sidecar(file_json, rec, filepath, filenm):
+def plotDQR_sidecar(file_json, rec, cfg_dataset, filenm):
 
     # get the variables from the json file
     dataSDWP_LowHigh = file_json['dataSDWP_LowHigh']
@@ -586,7 +588,7 @@ def plotDQR_sidecar(file_json, rec, filepath, filenm):
     # give a title to the figure
     p.suptitle(filenm)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_sigVdis.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', filenm + "_DQR_sigVdis.png") )
     p.close()
 
 
@@ -660,7 +662,7 @@ def plotDQR_sidecar(file_json, rec, filepath, filenm):
     # give a title to the figure
     p.suptitle(filenm)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_calib.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', filenm + "_DQR_calib.png") )
     p.close()
 
 
@@ -690,7 +692,7 @@ def plotDQR_sidecar(file_json, rec, filepath, filenm):
     # give a title to the figure
     p.suptitle(filenm)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_crosstalk.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', filenm + "_DQR_crosstalk.png") )
     p.close()
 
 
@@ -740,7 +742,7 @@ def plot_crosstalk(SD, dataCrosstalk, ax1, lst1, strTitle ):
 
 
 
-def plot_tIncCh_dqr( rec, filepath, filenm_lst, iqr_threshold_std=2, iqr_threshold_grad=1.5, flag_plot=False ):
+def plot_tIncCh_dqr( rec, cfg_dataset, filenm_lst, iqr_threshold_std=2, iqr_threshold_grad=1.5, flag_plot=False ):
 
     n_subjects = len(rec)
     n_files_per_subject = len(rec[0])
@@ -924,7 +926,7 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst, iqr_threshold_std=2, iqr_thresho
             # give a title to the figure and save it
             filenm = filenm_lst[subj_idx][file_idx]
             p.suptitle(filenm)
-            p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + '_DQR_tIncCh.png') )
+            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', filenm + '_DQR_tIncCh.png') )
 #            p.close()
 
             if flag_plot:
@@ -935,7 +937,11 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst, iqr_threshold_std=2, iqr_thresho
     return rec
 
 # !!! plot_group_dqr will fail if no tddr ?
-def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, subj_ids, subj_id_exclude, rec, filepath, flag_plot = True):   
+def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, rec, cfg_dataset, flag_plot = True):   
+    
+    subj_ids = cfg_dataset['subj_ids']
+    subj_id_exclude = cfg_dataset['subj_id_exclude']
+    
     n_subjects = n_subjects = len(subj_ids) - len(subj_id_exclude)
     subj_ids_new = [s for s in subj_ids if s not in subj_id_exclude]
     
@@ -1032,17 +1038,17 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
     axtmp.set_title('Max Slope Corrected')
 
     # give a title to the figure
-    dirnm = os.path.basename(os.path.normpath(filepath))
+    dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
     p.suptitle(f'Data set - {dirnm}')
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', "DQR_group.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', "DQR_group.png") )
     
     if flag_plot:
         p.show()
 
 
 
-def plot_gradCPT_VTC( stim, filepath, filenm ):
+def plot_gradCPT_VTC( stim, cfg_dataset, filenm ):
 
     RT = np.zeros((stim.shape[0], 4))
     RT[:,0] = np.array([stim.reaction_time.values])
@@ -1120,7 +1126,7 @@ def plot_gradCPT_VTC( stim, filepath, filenm ):
     # give a title to the figure
     p.suptitle(filenm)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gradCPT_VTC.png") )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', filenm + "_DQR_gradCPT_VTC.png") )
     p.close()
 
 

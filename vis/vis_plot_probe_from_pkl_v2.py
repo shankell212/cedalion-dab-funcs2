@@ -16,12 +16,14 @@ import cedalion.vis.plot_probe as vPlotProbe
 
 #%%
 
-path2results = "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/"
-
+#path2results = "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/"
+path2results = "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/derivatives/Shannon/processed_data"
 
 #filname = 	'blockaverage_STS_tddr_GLMfilt_unpruned_CONC.pkl.gz'     # STS
-filname = 'blockaverage_IWHD_imuGLM_tddr_GLMfilt_unpruned_CONC.pkl.gz'   # IWHD
- 
+#filname = 'blockaverage_IWHD_imuGLM_tddr_GLMfilt_unpruned_CONC.pkl.gz'   # IWHD
+
+filname = 'blockaverage_BS_tddr_GLMfilt_unpruned_CONC.pkl.gz' 
+
 filepath_bl = os.path.join(path2results , filname) 
     
 if os.path.exists(filepath_bl):
@@ -42,5 +44,5 @@ else:
 
 tstat = blockaverage_mean/blockaverage_stderr   # tstat = blockavg/ noise
 
-vPlotProbe.run_vis(blockaverage = blockaverage_stderr, geo2d = geo2d, geo3d = geo3d)
+vPlotProbe.run_vis(blockaverage = blockaverage_mean, geo2d = geo2d, geo3d = geo3d)
 

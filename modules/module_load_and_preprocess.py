@@ -49,21 +49,26 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             'gvtd_tddr' - the global variance of the time derivative of the 'od_tddr' data.
     '''
 
+    if not cfg_dataset['derivatives_subfolder']:
+        cfg_dataset['derivatives_subfolder'] = ''
 
     # make sure derivatives folders exist
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'])
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'ica')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
+    # der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'ica')  # !!! not currently using
+    # if not os.path.exists(der_dir):
+    #     os.makedirs(der_dir)
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'processed_data')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
 
@@ -72,14 +77,26 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
     n_files_per_subject = len(cfg_dataset['file_ids'])
     
     n_subjects_corrected =  len(cfg_dataset['subj_ids']) - len(cfg_dataset['subj_id_exclude'])
+    
+    # init variables outside loop
+    rec = []
+    chs_pruned_subjs = []
+    slope_base_subjs = []
+    slope_corrected_subjs = []
+    gvtd_corrected_subjs = []
+    snr0_subjs = []
+    snr1_subjs = []
+    subj_idx_included = 0  # NEW: index for included subjects only
 
     # loop over subjects and files
     for subj_idx in range(n_subjects):
+        
+        # if subject id is in excluded list, skip processing
+        if subj_ids[subj_idx] in cfg_dataset['subj_id_exclude']:
+            print(f"Subject {subj_ids[subj_idx]} listed in subj_id_exclude. Skipping processing for this subject.")
+            continue
+        
         for file_idx in range(n_files_per_subject):
-            
-            if subj_ids[subj_idx] in cfg_dataset['subj_id_exclude']:  # if current subj is excluded then skip processing
-                print(f'Subject {subj_ids[subj_idx]} listed in subj_id_exclude. Skipping processing for this subject.')    
-                continue 
             
             filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
             
@@ -88,7 +105,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
             subStr = filenm.split('_')[0]
             subDir = os.path.join(cfg_dataset['root_dir'], subStr, 'nirs')
-
+            
             file_path = os.path.join(subDir, filenm )
             records = cedalion.io.read_snirf( file_path ) 
 
@@ -119,7 +136,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
             
-            pruned_chans = chs_pruned.where(chs_pruned != 0.4, drop=True).channel.values # get array of channels that were pruned
+            pruned_chans = chs_pruned.where(chs_pruned != 0.58, drop=True).channel.values # get array of channels that were pruned
 
             # Calculate OD 
             # if flag pruned channels is True, then do rest of preprocessing on pruned amp, if not then do preprocessing on unpruned data
@@ -136,7 +153,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             # Walking filter
             if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']: 
                 print('Starting imu glm filtering step on walking portion of data.')
-                recTmp["od_corrected"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+                recTmp["od_corrected"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset)
                 
             # Get the slope of 'od' before motion correction and any bandpass filtering
             slope_base = quant_slope(recTmp, "od", True)
@@ -202,66 +219,86 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             snr0, _ = quality.snr(amp_masked.sel(wavelength=lambda0), cfg_preprocess['cfg_prune']['snr_thresh'])
             snr1, _ = quality.snr(amp_masked.sel(wavelength=lambda1), cfg_preprocess['cfg_prune']['snr_thresh'])
 
-            
-            pfDAB_dqr.plotDQR( recTmp, chs_pruned, cfg_preprocess, filenm, cfg_dataset['root_dir'], cfg_dataset['cfg_hrf']['stim_lst'] )
+            pfDAB_dqr.plotDQR( recTmp, chs_pruned, cfg_preprocess, filenm, cfg_dataset )
             
             # Plot slope before and after MA
             if cfg_preprocess['cfg_motion_correct']['flag_do_tddr']:
-                pfDAB_dqr.plot_slope(recTmp, [slope_base, slope_corrected], cfg_preprocess, filenm, cfg_dataset['root_dir'])
+                pfDAB_dqr.plot_slope(recTmp, [slope_base, slope_corrected], cfg_preprocess, filenm, cfg_dataset)
 
             # !!! update this code adn the func in DQR
-            # # load the sidecar json file 
-            # if os.path.exists(file_path + '.json'):
-            #     with open(file_path + '.json') as json_file:
-            #         file_json = json.load(json_file)
-            #     if 'dataSDWP_LowHigh' in file_json:
-            #         pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, cfg_dataset['root_dir'], filenm )
+            # load the sidecar json file 
+            file_path_json = os.path.join(cfg_dataset['root_dir'], 'sourcedata', 'raw', subStr, filenm + '.json')
+            if os.path.exists(file_path_json):
+                with open(file_path_json) as json_file:
+                    file_json = json.load(json_file)
+                if 'dataSDWP_LowHigh' in file_json:
+                    pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, cfg_dataset, filenm )
 
-            # snr0 = np.nanmedian(snr0.values)
-            # snr1 = np.nanmedian(snr1.values)
-
+            snr0 = np.nanmedian(snr0.values)
+            snr1 = np.nanmedian(snr1.values)
 
             #
             # Organize the processed data
             #
-            if subj_idx == 0 and file_idx == 0:
-                rec = []
-                chs_pruned_subjs = []
-                slope_base_subjs = []
-                slope_corrected_subjs = []
-                gvtd_corrected_subjs = []
-                snr0_subjs = []
-                snr1_subjs = []
+            
+            # #if 'rec' not in vars() and file_idx == 0:
+            # if subj_idx == 0 and file_idx == 0:
+            #     rec = []
+            #     chs_pruned_subjs = []
+            #     slope_base_subjs = []
+            #     slope_corrected_subjs = []
+            #     gvtd_corrected_subjs = []
+            #     snr0_subjs = []
+            #     snr1_subjs = []
 
-                rec.append( [recTmp] )
-                chs_pruned_subjs.append( [chs_pruned] )
-                slope_base_subjs.append( [slope_base] )
-                slope_corrected_subjs.append( [slope_corrected] )
-                gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
-                snr0_subjs.append( [snr0] )
-                snr1_subjs.append( [snr1] )
-            elif file_idx == 0:
-                rec.append( [recTmp] )
-                chs_pruned_subjs.append( [chs_pruned] )
-                slope_base_subjs.append( [slope_base] )
-                slope_corrected_subjs.append( [slope_corrected] )
-                gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
-                snr0_subjs.append( [snr0] )
-                snr1_subjs.append( [snr1] )
+            #     rec.append( [recTmp] )
+            #     chs_pruned_subjs.append( [chs_pruned] )
+            #     slope_base_subjs.append( [slope_base] )
+            #     slope_corrected_subjs.append( [slope_corrected] )
+            #     gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
+            #     snr0_subjs.append( [snr0] )
+            #     snr1_subjs.append( [snr1] )
+            # elif file_idx == 0:
+            #     rec.append( [recTmp] )
+            #     chs_pruned_subjs.append( [chs_pruned] )
+            #     slope_base_subjs.append( [slope_base] )
+            #     slope_corrected_subjs.append( [slope_corrected] )
+            #     gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
+            #     snr0_subjs.append( [snr0] )
+            #     snr1_subjs.append( [snr1] )
+            # else:
+            #     rec[subj_idx].append( recTmp )
+            #     chs_pruned_subjs[subj_idx].append( chs_pruned )
+            #     slope_base_subjs[subj_idx].append( slope_base )
+            #     slope_corrected_subjs[subj_idx].append( slope_corrected )
+            #     gvtd_corrected_subjs[subj_idx].append( np.nanmean(recTmp.aux_ts['gvtd_corrected'].values) )
+            #     snr0_subjs[subj_idx].append( snr0 )
+            #     snr1_subjs[subj_idx].append( snr1 )
+                
+                
+            if file_idx == 0:
+                rec.append([recTmp])
+                chs_pruned_subjs.append([chs_pruned])
+                slope_base_subjs.append([slope_base])
+                slope_corrected_subjs.append([slope_corrected])
+                gvtd_corrected_subjs.append([np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)])
+                snr0_subjs.append([snr0])
+                snr1_subjs.append([snr1])
             else:
-                rec[subj_idx].append( recTmp )
-                chs_pruned_subjs[subj_idx].append( chs_pruned )
-                slope_base_subjs[subj_idx].append( slope_base )
-                slope_corrected_subjs[subj_idx].append( slope_corrected )
-                gvtd_corrected_subjs[subj_idx].append( np.nanmean(recTmp.aux_ts['gvtd_corrected'].values) )
-                snr0_subjs[subj_idx].append( snr0 )
-                snr1_subjs[subj_idx].append( snr1 )
-
+                rec[subj_idx_included].append(recTmp)
+                chs_pruned_subjs[subj_idx_included].append(chs_pruned)
+                slope_base_subjs[subj_idx_included].append(slope_base)
+                slope_corrected_subjs[subj_idx_included].append(slope_corrected)
+                gvtd_corrected_subjs[subj_idx_included].append(np.nanmean(recTmp.aux_ts['gvtd_corrected'].values))
+                snr0_subjs[subj_idx_included].append(snr0)
+                snr1_subjs[subj_idx_included].append(snr1)
+            
+        subj_idx_included += 1  # Only incremented if subject is included
+        
         # End of file loop
     # End of subject loop
-
     # plot the group DQR
-    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], cfg_dataset['subj_id_exclude'], rec, cfg_dataset['root_dir'], flag_plot=False )
+    pfDAB_dqr.plot_group_dqr( n_subjects_corrected, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, rec, cfg_dataset, flag_plot=False )
     # !!! plot_group_dqr will fail if no tddr ?
 
     

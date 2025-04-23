@@ -5,24 +5,17 @@
 import os
 import cedalion
 import cedalion.nirs
-import cedalion.sigproc.quality as quality
 import cedalion.xrutils as xrutils
-from cedalion.sigdecomp.ERBM import ERBM
 
 import xarray as xr
-import matplotlib.pyplot as p
 import cedalion.plots as plots
 from cedalion import units
 import numpy as np
-import pandas as pd
-from math import ceil
 
 import gzip
 import pickle
 import json
 
-
-# import my own functions from a different directory
 import sys
 sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
 import module_image_recon as img_recon 
@@ -33,21 +26,20 @@ import module_spatial_basis_funs_ced as sbf
 import warnings
 warnings.filterwarnings('ignore')
 
-import pyvista as pv
 
 #%%
 # Have summed wt for each vertices across subjects
 
 
-# %% Initial root directory and analysis parameters
-##############################################################################
+#%% Load in cfg pickle file
+root_dir = "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/"  # CHANGE
+derivatives_subfolder = "Shannon"   # CHANGE
+cfg_pkl_name = "cfg_params_BS_tddr_GLMfilt_unpruned.pkl"    # CHANGE   -- this is your config file name
 
-# Load in cfg pickle file
+#cfg_pkl_name = "cfg_params_STS_tddr_GLMfilt_unpruned.pkl" # STS
+#cfg_pkl_name = "cfg_params_IWHD_imuGLM_tddr_GLMfilt_unpruned.pkl"  # IWHD
 
-cfg_pkl_name = "cfg_params_STS_tddr_GLMfilt_unpruned.pkl" # STS
-cfg_pkl_name = "cfg_params_IWHD_imuGLM_tddr_GLMfilt_unpruned.pkl"  # IWHD
-
-cfg_filepath = os.path.join("/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/", cfg_pkl_name) 
+cfg_filepath = os.path.join(root_dir, 'derivatives', derivatives_subfolder, 'processed_data', cfg_pkl_name) 
 
 # Open the file in binary read mode and load its contents
 with open(cfg_filepath, 'rb') as file:
@@ -60,20 +52,11 @@ cfg_preprocess = cfg_params["cfg_preprocess"]
 cfg_blockavg = cfg_params["cfg_blockavg"]
 cfg_motion_correct = cfg_preprocess["cfg_motion_correct"]
 
-
 subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
 
 
-
-#%%
-# cfg_dataset = {  # !!! NOTE: this needs to be the same as what was used for preproc and blockavg
-#     'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
-#     'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19'], 
-#     'file_ids' : ['STS_run-01'],
-#     'subj_id_exclude' : ['10', '15', '16', '17'] # if you want to exclude a subject from the group average
-# }
-# subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
-
+# %% Initial root directory and analysis parameters
+##############################################################################
 
 cfg_sb = {
     'mask_threshold': -2,
@@ -102,7 +85,7 @@ cfg_img_recon = {
 
 mse_min_thresh = 1e-3 
 
-save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
+save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data')
 
 # !!! SAVE image recon configs in another json 
 # !!! ADD flag for if doing image recon on ts or hrf mag ?
@@ -303,6 +286,7 @@ results = {'X_hrf_mag': all_trial_X_hrf_mag,
            'X_mse_between': all_trial_X_mse_between,
            'X_mse_within': all_trial_X_mse_within
            }
+
 if cfg_img_recon['DIRECT']:
     direct_name = 'direct'
 else:
@@ -318,12 +302,12 @@ if cfg_img_recon['flag_Cmeas']:
 else:
     Cmeas_name = 'noCmeas'
     
-der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'image_recon')
+der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon')
 if not os.path.exists(der_dir):
     os.makedirs(der_dir)
 
 # if cfg_img_recon['SB']:
-#     filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
+#     filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
 #     print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}_sigma_brain_{cfg_sb["sigma_brain"]}_sigma_scalp_{cfg_sb["sigma_scalp"]}.pkl.gz')
 #     file = gzip.GzipFile(filepath, 'wb')
 #     file.write(pickle.dumps(results))
@@ -331,7 +315,7 @@ if not os.path.exists(der_dir):
 # else:
     
 # Save results
-filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
+filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_{p_save_str}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
 print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
 file = gzip.GzipFile(filepath, 'wb')
 file.write(pickle.dumps(results))
@@ -346,14 +330,13 @@ file.close()
 
 #%% Save image configs in pickle and json file
 
-
-fil_name = f'_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz'
+fil_name = f'_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}'
 # SAVE cfg params to json file
 dict_cfg_save = {"cfg_sb": cfg_sb, "cfg_img_recon" : cfg_img_recon}
 
 cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + fil_name
-save_json_path = os.path.join(save_path, cfg_save_str + '.json')
-save_pickle_path = os.path.join(save_path, cfg_save_str + '.pkl')
+save_json_path = os.path.join(save_path, 'image_recon', cfg_save_str + '.json')
+save_pickle_path = os.path.join(save_path, 'image_recon', cfg_save_str + '.pkl')
 
  
 # Save configs as json to view outside of python
@@ -366,6 +349,7 @@ with open(save_pickle_path, "wb") as f:
     
 print(f'  Saving config parameters to {cfg_save_str}')
     
+
 #%% build plots 
 import importlib
 importlib.reload(img_recon)
@@ -377,11 +361,8 @@ SAVE = True
 flag_hbo_list = [True, False]
 flag_brain_list = [True, False]
 flag_img_list = ['mag', 'tstat', 'noise'] #, 'noise'
-
-if cfg_dataset["file_ids"][0].split("_")[0] == 'IWHD':
-    flag_condition_list = ['ST', 'DT']   
-elif cfg_dataset["file_ids"][0].split("_")[0] == 'STS':
-    flag_condition_list = ['STS'] 
+    
+flag_condition_list = cfg_hrf['stim_lst']
 
 # with gzip.open( filepath, 'rb') as f:
 #      results = pickle.load(f)
@@ -448,7 +429,7 @@ for flag_hbo in flag_hbo_list:
                 
                 if SAVE:
                     img_folder = f'{direct_name}_aspatial-{cfg_img_recon["alpha_spatial"]}_ameas-{cfg_img_recon["alpha_meas"]}_{Cmeas_name}_{SB_name}'
-                    save_dir_tmp= os.path.join(cfg_dataset["root_dir"], 'derivatives', 'plots', 'image_recon', img_folder)
+                    save_dir_tmp= os.path.join(cfg_dataset["root_dir"], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'image_recon', img_folder)
                     if not os.path.exists(save_dir_tmp):
                         os.makedirs(save_dir_tmp)
                     file_name = f'IMG_{flag_condition}_{flag_img}_{hbx_brain_scalp}.png'

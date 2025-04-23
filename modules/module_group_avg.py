@@ -23,10 +23,12 @@ import pdb
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
     subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
+    
     # Build a new list excluding the subjects in subj_id_exclude:
+    excluded = set(cfg_dataset['subj_id_exclude'])
     new_filenm_lst = [
-        fname for fname in cfg_dataset['filenm_lst']
-        if str(int(fname[0].split('_')[0].replace('sub-', ''))) not in cfg_dataset['subj_id_exclude']
+        run_list for run_list in cfg_dataset['filenm_lst']
+        if run_list[0].split('_')[0].replace('sub-', '') not in excluded
     ]
     
     # choose correct mse values based on if blockaveraging od or conc
@@ -51,9 +53,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
     blockaverage_subj = None
     for subj_idx in range( n_subjects ):
         for file_idx in range( n_files_per_subject ):
-
-            #filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
-            #print( f"   Running {subj_idx+1} of {n_subjects} subjects : {filenm}" )
+            
             filenm = new_filenm_lst[subj_idx][file_idx]
             print(f'Running {subj_idx+1} of {n_subjects} subjects not excluded : {filenm} ')
             
@@ -382,9 +382,9 @@ def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blocka
         p.suptitle(title_str)
 
         if 'chromo' in foo_da.dims:
-            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.chromo.values[i_wav_chromo]}.png') )
+            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.chromo.values[i_wav_chromo]}.png') )
         else:
-            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.wavelength.values[i_wav_chromo]:.0f}nm.png') )
+            p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', f'DQR_group_weighted_avg_{rec_str}_{trial_type}_{foo_da.wavelength.values[i_wav_chromo]:.0f}nm.png') )
         p.close()
 
 
@@ -432,7 +432,7 @@ def plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, 
     dirnm = os.path.basename(os.path.normpath(cfg_dataset['root_dir']))
     p.suptitle(f'Data set - {dirnm}')
 
-    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR', f'DQR_group_mse_histogram_{rec_str}_{trial_type}.png') )
+    p.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', f'DQR_group_mse_histogram_{rec_str}_{trial_type}.png') )
     p.close()
 
 

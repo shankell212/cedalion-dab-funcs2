@@ -43,7 +43,7 @@ import pdb
 
 #%%
 
-def filterWalking(rec, rec_str, cfg_imu_glm, filenm = None, filepath = None):
+def filterWalking(rec, rec_str, cfg_imu_glm, filenm = None, cfg_dataset = None):
     ''' Filter Walking portion of the data in dOD space 
         inputs: 
             rec - xarray 
@@ -178,9 +178,8 @@ def filterWalking(rec, rec_str, cfg_imu_glm, filenm = None, filepath = None):
     dod2 = dod - dodHP.T + dodHPfiltnew.T # add back in low freq dod data
     
     # Plot gait artifact ratio before and after correction & variance explained
-    if cfg_imu_glm['plot_flag_imu']:
-        plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm, filepath)
-        plotVarExp(rec, dod, z_resamp, varExp, filenm, filepath)
+    plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm, cfg_dataset)
+    plotVarExp(rec, dod, z_resamp, varExp, filenm, cfg_dataset)
         
     # -------------------------
     # Create new xarray with filtered dOD data
@@ -286,9 +285,9 @@ def GLM_designMat(z_resamp, lstWalk, hWin, lstWalktmp):
     
     return A, AA
 
-def plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm = None, filepath = None):
+def plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm = None, cfg_dataset = None):
     # If save path for plot does not exist, create it
-    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'walking_filter')
+    der_dir = os.path.join(cfg_dataset["root_dir"], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots', 'DQR', 'walking_filter')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
         
@@ -325,10 +324,10 @@ def plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm = None, filepath 
     
     plt.suptitle(filenm)
 
-    plt.savefig( os.path.join(filepath, 'derivatives', 'plots','DQR', 'walking_filter', filenm + "_imu_glm_gaitRatio.png") )
+    plt.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots','DQR', 'walking_filter', filenm + "_imu_glm_gaitRatio.png") )
     plt.close()
     
-def plotVarExp(rec, dod, z_resamp, varExp, filenm = None, filepath = None):
+def plotVarExp(rec, dod, z_resamp, varExp, filenm = None, cfg_dataset = None):
     '''  Plot variance explained by each ICA component '''
     f, ax = plt.subplots(5, 1, figsize=(8, 15))
 
@@ -349,5 +348,5 @@ def plotVarExp(rec, dod, z_resamp, varExp, filenm = None, filepath = None):
     
     plt.suptitle(filenm)
 
-    plt.savefig( os.path.join(filepath, 'derivatives', 'plots','DQR', 'walking_filter', filenm + "_imu_glm_varExp.png") )
+    plt.savefig( os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'plots','DQR', 'walking_filter', filenm + "_imu_glm_varExp.png") )
     plt.close()
