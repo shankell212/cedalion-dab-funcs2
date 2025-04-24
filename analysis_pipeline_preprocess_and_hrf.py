@@ -8,37 +8,39 @@ import cedalion.nirs
 import cedalion.sigproc.quality as quality
 import cedalion.xrutils as xrutils
 from cedalion.sigdecomp.ERBM import ERBM
-
-import xarray as xr
-import matplotlib.pyplot as p
-import cedalion.plots as plots
 from cedalion import units
 import numpy as np
-import pandas as pd
-from math import ceil
 
 import gzip
 import pickle
 import json
 
-
-# import my own functions from a different directory
+# import functions from a different directory
 import sys
-#sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
 import module_load_and_preprocess as pfDAB
 import module_plot_DQR as pfDAB_dqr
 import module_group_avg as pfDAB_grp_avg    
 import module_ERBM_ICA as pfDAB_ERBM
-import module_image_recon as pfDAB_img
-import module_spatial_basis_funs_ced as sbf 
-
 
 # Turn off all warnings
 import warnings
 warnings.filterwarnings('ignore')
 
-import pyvista as pv
+
+
+#%% Notes
+# DQR
+    # in future save pruned channel / other dqr quantitative values in a csv file 
+        # will decide what to save as a group 
+        
+
+# save cfgs in json (already doing) & load it into down stream processing (img recon) 
+    # will b .yml in future
+    
+# image recon plots will be in dev - update
+# BC thread or email -- pipeline .yml file   instead of json, will this be issue
+
 # %% 
 ##############################################################################
 import importlib
@@ -51,33 +53,38 @@ importlib.reload(pfDAB_grp_avg)
 ##############################################################################
 
 cfg_hrf = {
-    'stim_lst' : ['ST', 'DT'], 
-    't_pre' : 5 *units.s, 
-    't_post' : 33 *units.s
+    'stim_lst' : ['right', 'left'],       #['ST', 'DT'], 
+    't_pre' : 2*units.s,  # 5 *units.s, 
+    't_post' : 16*units.s,   # 33 *units.s
     #'t_post' : [ 33, 33 ] *units.s   # !!! GLM does not let you have different time ranges for diff stims right now
     }
 
 cfg_dataset = {
-    'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
-    'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19'],
-    'file_ids' : ['IWHD_run-01'],
-    'subj_id_exclude' : ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
-    'cfg_hrf' : cfg_hrf
+    #'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
+    'root_dir' : "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/", 
+    #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'],
+    'subj_ids' : ['538', '547', '549', '568', '577', '580', '581', '583', '586', '587', '588', '592', '613', '618', '619', '621', '633'],   # BS
+    'file_ids' : ['BS_run-01', 'BS_run-02', 'BS_run-03'],
+    'subj_id_exclude' : ['538', '547', '549', '568', '577', '580', '581', '583'],   # 577, 580 and 583 all have 1220 chans???   #[10, 14, 16, 17, 18],  # old numbering: ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
+    'cfg_hrf' : cfg_hrf,
+    'derivatives_subfolder' : 'Shannon'    # if '' (empty string), will save in normal derivatives folder, otherwise will put all saved stuff in your subfolder under derivs
 }
 
-# Add 'filenm_lst' separately after cfg_dataset is initialized
-cfg_dataset['filenm_lst'] = [
-    [f"sub-{subj_id}_task-{file_id}_nirs"] 
-    for subj_id in cfg_dataset['subj_ids'] 
-    for file_id in cfg_dataset['file_ids']
-    ]
+cfg_dataset['filenm_lst'] = [               # Add 'filenm_lst' separately after cfg_dataset is initialized
+    [f"sub-{subj_id}_task-{file_id}_nirs" for file_id in cfg_dataset['file_ids']]
+    for subj_id in cfg_dataset['subj_ids']
+]
 
-
+# cfg_dataset['filenm_lst'] = [             # Add 'filenm_lst' separately after cfg_dataset is initialized
+#     [f"sub-{subj_id}_task-{file_id}_nirs"] 
+#     for subj_id in cfg_dataset['subj_ids'] 
+#     for file_id in cfg_dataset['file_ids']
+#     ]
 
 cfg_prune = {
     'snr_thresh' : 5, # the SNR (std/mean) of a channel. 
     'sd_threshs' : [1, 60]*units.mm, # defines the lower and upper bounds for the source-detector separation that we would like to keep
-    'amp_threshs' : [1e-5, 0.84], # define whether a channel's amplitude is within a certain range
+    'amp_threshs' : [1e-3, 0.84], # define whether a channel's amplitude is within a certain range   --- was using 1e-5 before?
     'perc_time_clean_thresh' : 0.6,
     'sci_threshold' : 0.6,
     'psp_threshold' : 0.1,
@@ -89,10 +96,10 @@ cfg_prune = {
 cfg_imu_glm = {'statesPerDataFrame' : 89,   # FOR WALKING DATA
 		'hWin' : np.arange(-3,5,1), # window for impulse response function 
 		'statesPerDataFrame' : 89,
-		'n_components' : [3, 2],  # [gyro, accel]       # !!! note: changing this will change fig sizes - add that in?
+		'n_components' : [3, 2],  # [gyro, accel]       # !!! note: changing this will change fig sizes 
         'butter_order' : 4,   # butterworth filter order
         'Fc' : 0.1,   # cutoff freq (Hz)
-        'plot_flag_imu' : True  
+        'plot_flag_imu' : True  # !!! remove and just always save plots
 }
 
 cfg_motion_correct = {
@@ -100,17 +107,18 @@ cfg_motion_correct = {
     #'splineSG_p' : 0.99, 
     #'splineSG_frame_size' : 10 * units.s,
     'flag_do_tddr' : True,  
-    'flag_do_imu_glm' : True,
+    'flag_do_imu_glm' : False,   # only for walking data
     'cfg_imu_glm' : cfg_imu_glm,
 }
 
 cfg_bandpass = { 
+    'flag_bandpass_filter' : True,
     'fmin' : 0.01 * units.Hz, #0.02 * units.Hz,
     'fmax' : 0.5 * units.Hz  #3 * units.Hz
 }
 
 
-cfg_GLM = {
+cfg_GLM = {    # this is a "filter," - we are getting HRFs from block average
     'drift_order' : 1,
     'distance_threshold' : 20 *units.mm, # for ssr
     'short_channel_method' : 'mean',
@@ -123,11 +131,12 @@ cfg_GLM = {
 
 cfg_preprocess = {
     'flag_prune_channels' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
+    'flag_do_GLM_filter' : True,
+    'flag_save_preprocessed_data' : True,
     'median_filt' : 1, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
     'cfg_bandpass' : cfg_bandpass,
-    'flag_do_GLM_filter' : True,
     'cfg_GLM' : cfg_GLM 
 }
 
@@ -148,24 +157,23 @@ cfg_mse_od = {
     }
 
 cfg_blockavg = {
-    'rec_str' : 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
+    'rec_str' :  'conc',  # 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
     'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
     'cfg_hrf' : cfg_hrf,
     'trange_hrf_stat' : [10, 20],  
-    'flag_save_group_avg_hrf': False,
-    'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
+    'flag_save_block_avg_hrf': True,
+    'flag_save_each_subj' : False,  # !!! do we need this?  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
     }               
 
-
-
 cfg_erbmICA = {}
 
-save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
 
-flag_load_preprocessed_data = True  
-flag_save_preprocessed_data = False   # SAVE or no save
+
+save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset["derivatives_subfolder"],'processed_data')  
+
+flag_load_preprocessed_data = False  
 
 flag_load_blockaveraged_data = False
 
@@ -176,20 +184,6 @@ flag_load_blockaveraged_data = False
 # determine the number of subjects and files. Often used in loops.
 n_subjects = len(cfg_dataset['subj_ids'])
 n_files_per_subject = len(cfg_dataset['file_ids'])
-
-# files to load
-for subj_id in cfg_dataset['subj_ids']:
-    subj_idx = cfg_dataset['subj_ids'].index(subj_id)
-    for file_id in cfg_dataset['file_ids']:
-        file_idx = cfg_dataset['file_ids'].index(file_id)
-        filenm = f'sub-{subj_id}_task-{file_id}_nirs'
-        if subj_idx == 0 and file_idx == 0:
-            cfg_dataset['filenm_lst'] = []
-            cfg_dataset['filenm_lst'].append( [filenm] )
-        elif file_idx == 0:
-            cfg_dataset['filenm_lst'].append( [filenm] )
-        else:
-            cfg_dataset['filenm_lst'][subj_idx].append( filenm )
 
 import importlib
 importlib.reload(pfDAB)
@@ -224,38 +218,44 @@ if not flag_load_preprocessed_data:
 
     
     # SAVE preprocessed data 
-    if flag_save_preprocessed_data:
+    if cfg_preprocess['flag_save_preprocessed_data']:
         print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
-        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+        with gzip.open( os.path.join(save_path, 
                                      'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
             pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
             
-        with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+        with gzip.open( os.path.join(save_path, 
                                      'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f:
             pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
             
             
         # SAVE cfg params to json file
-        # !!! ADD image recon cfg  ?? - or make it its own .json since i am planning to separate into 2 scripts
-        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, 
+                         "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
         
-        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.json'
-            
-        with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
+        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str
+        save_json_path = os.path.join(save_path, cfg_save_str + '.json')
+        save_pickle_path = os.path.join(save_path, cfg_save_str + '.pkl')
+                
+        # Save configs as json to view outside of python
+        with open(os.path.join(save_json_path), "w", encoding="utf-8") as f:
             json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
+
+        # Save configs as Pickle for Python usage (preserving complex objects like Pint quantities)
+        with open(save_pickle_path, "wb") as f:
+            pickle.dump(dict_cfg_save, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("Preprocessed data successfully saved.")
+
         
         
 # LOAD IN SAVED DATA
 else:
-    print("Loading saved data")   # !!! update with new naming for pruned or unpruned above
+    print("Loading saved data")   
     with gzip.open( os.path.join(save_path, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
          rec = pickle.load(f)
     with gzip.open( os.path.join(save_path, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f:
          chs_pruned_subjs = pickle.load(f)
     print(f'Data loaded successfully for {cfg_dataset["file_ids"][0].split("_")[0]}')
-
-
 
 
 
@@ -329,15 +329,15 @@ if not flag_load_blockaveraged_data:
     else:    # if not pruning, save weighted blockaverage data
         _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     
-    groupavg_results = {'blockaverage': blockaverage_mean,
+    groupavg_results = {'blockaverage': blockaverage_mean, # group_blockaverage  rename
                'blockaverage_stderr': blockaverage_stderr,
-               'blockaverage_subj': blockaverage_subj,
-               'blockaverage_mse_subj': blockaverage_mse_subj,
+               'blockaverage_subj': blockaverage_subj,  # always unweighted   - load into img recon
+               'blockaverage_mse_subj': blockaverage_mse_subj, # - load into img recon
                'geo2d' : rec[0][0].geo2d,
                'geo3d' : rec[0][0].geo3d
                }
     
-    if cfg_blockavg['flag_save_group_avg_hrf']:
+    if cfg_blockavg['flag_save_block_avg_hrf']:
         file_path_pkl = os.path.join(save_path, 'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + save_str + '.pkl.gz')
         file = gzip.GzipFile(file_path_pkl, 'wb')
         file.write(pickle.dumps(groupavg_results))
