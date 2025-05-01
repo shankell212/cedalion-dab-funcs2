@@ -132,7 +132,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
                     print("There is no valid imu data in aux, skipping walking filter")
 
-
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
             
@@ -176,8 +175,8 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     recTmp['od_corrected'] = recTmp['od']
                     slope_corrected = quant_slope(recTmp, "od_corrected", True)  # Get slopes after correction before bandpass filtering
             
-            #slope_corrected = quant_slope(recTmp, "od_corrected", False)  # Get slopes after correction before bandpass filtering
             
+            recTmp['od_corrected'] = recTmp['od_corrected'].where( ~recTmp['od_corrected'].isnull(), 1e-18 )  # replace any NaNs after TDDR
             
             # GVTD for Corrected od before bandpass filtering
             amp_corrected = recTmp['od_corrected'].copy()  
@@ -202,10 +201,12 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
            
             # Conc
             recTmp['conc'] = cedalion.nirs.od2conc(recTmp['od_corrected'], recTmp.geo3d, dpf, spectrum="prahl")
-
+            
+            # !!! NEED pruned data --- so that mean short sep data does not noise
+                # maybe also pass channels pruned array
             # GLM filtering step
             if cfg_preprocess['flag_do_GLM_filter']:
-                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'])
+                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'], pruned_chans)
                 
                 recTmp['od_corrected'] = cedalion.nirs.conc2od(recTmp['conc'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
                 recTmp['od_corrected'] = recTmp['od_corrected'].transpose('channel', 'wavelength', 'time') # need to transpose to match recTmp['od'] bc conc2od switches the axes
@@ -307,14 +308,14 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
 #%%
 
-def prune_mask_ts(ts, channels_to_nan):
+def prune_mask_ts(ts, pruned_chans):
     '''
     Function to mask pruned channels with NaN .. essentially repruning channels
     Parameters
     ----------
     ts : data array
         time series from rec[rec_str].
-    channels_to_nan : list or array
+    pruned_chans : list or array
         list or array of channels that were pruned prior.
 
     Returns
@@ -323,8 +324,15 @@ def prune_mask_ts(ts, channels_to_nan):
         time series that has been "repruned" or masked with data for the pruned channels as NaN.
 
     '''
-    mask = np.isin(ts.channel.values, channels_to_nan)
-    mask_expanded = mask[:, None, None]
+    mask = np.isin(ts.channel.values, pruned_chans)
+    
+    if ts.ndim == 3 and ts.shape[0] == len(ts.channel):
+        mask_expanded = mask[:, None, None]  # (chan, wav, time)
+    elif ts.ndim == 3 and ts.shape[1] == len(ts.channel):
+        mask_expanded = mask[None, :, None]  # (chrom, chan, time)
+    else:
+        raise ValueError("Expected input shape to be either (chan, dim, time) or (dim, chan, time)")
+
     ts_masked = ts.where(~mask_expanded, np.nan)
     return ts_masked
 
@@ -445,28 +453,45 @@ def pruneChannels( rec, cfg_prune ):
     return rec, chs_pruned, sci, psp
 
 
-def GLM(rec, rec_str, cfg_GLM):
+def GLM(rec, rec_str, cfg_GLM, pruned_chans):
     
+    # get pruned data for SSR
+    rec_pruned = prune_mask_ts(rec[rec_str], pruned_chans)
+    #rec_pruned = rec_pruned.where( ~rec_pruned].isnull(), 1e-18 )   # quick fix 
+
     #### build design matrix
     ts_long, ts_short = cedalion.nirs.split_long_short_channels(
-        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']
+        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']  # !!! change to rec_pruned once NaN prob fixed
     )
     
     # build regressors
-    dm, channel_wise_regressors = glm.make_design_matrix(
-        rec[rec_str],
-        ts_short,
-        rec.stim,
-        rec.geo3d,
-        basis_function = glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
-        drift_order = cfg_GLM['drift_order'],
-        short_channel_method = cfg_GLM['short_channel_method']
+    # dm, channel_wise_regressors = glm.make_design_matrix(
+    #     rec[rec_str],
+    #     ts_short,
+    #     rec.stim,
+    #     rec.geo3d,
+    #     basis_function = glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
+    #     drift_order = cfg_GLM['drift_order'],
+    #     short_channel_method = cfg_GLM['short_channel_method']
+    # )
+    
+    
+    dm = (
+    glm.design_matrix.hrf_regressors(
+        rec[rec_str], rec.stim, glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std'])
     )
-    
+    & glm.design_matrix.drift_regressors(rec[rec_str], drift_order = cfg_GLM['drift_order'])
+    & glm.design_matrix.closest_short_channel_regressor(rec[rec_str], ts_short, rec.geo3d)
+)
+
     #### fit the model 
-    betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
-    
-    pred_all = glm.predict(rec[rec_str], betas, dm, channel_wise_regressors)
+    #pdb.set_trace()
+    #betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
+    results = glm.fit(rec[rec_str], dm, noise_model= cfg_GLM['noise_model'])  #, max_jobs=1)
+
+    betas = results.sm.params
+
+    pred_all = glm.predict(rec[rec_str], betas, dm)  #, channel_wise_regressors)
     pred_all = pred_all.pint.quantify('micromolar')
     
     residual = rec[rec_str] - pred_all
@@ -475,9 +500,8 @@ def GLM(rec, rec_str, cfg_GLM):
     pred_hrf = glm.predict(
                             rec[rec_str],
                             betas.sel(regressor=betas.regressor.str.startswith("HRF ")),
-                            dm,
-                            channel_wise_regressors
-                        )
+                            dm ) #,
+                            #channel_wise_regressors)
     
     pred_hrf = pred_hrf.pint.quantify('micromolar')
     
