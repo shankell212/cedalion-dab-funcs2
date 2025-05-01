@@ -132,7 +132,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
                     print("There is no valid imu data in aux, skipping walking filter")
 
-
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
             
@@ -176,8 +175,8 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     recTmp['od_corrected'] = recTmp['od']
                     slope_corrected = quant_slope(recTmp, "od_corrected", True)  # Get slopes after correction before bandpass filtering
             
-            #slope_corrected = quant_slope(recTmp, "od_corrected", False)  # Get slopes after correction before bandpass filtering
             
+            recTmp['od_corrected'] = recTmp['od_corrected'].where( ~recTmp['od_corrected'].isnull(), 1e-18 )  # replace any NaNs after TDDR
             
             # GVTD for Corrected od before bandpass filtering
             amp_corrected = recTmp['od_corrected'].copy()  
@@ -202,7 +201,9 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
            
             # Conc
             recTmp['conc'] = cedalion.nirs.od2conc(recTmp['od_corrected'], recTmp.geo3d, dpf, spectrum="prahl")
-
+            
+            # !!! NEED pruned data --- so that mean short sep data does not noise
+                # maybe also pass channels pruned array
             # GLM filtering step
             if cfg_preprocess['flag_do_GLM_filter']:
                 recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'])
@@ -453,20 +454,32 @@ def GLM(rec, rec_str, cfg_GLM):
     )
     
     # build regressors
-    dm, channel_wise_regressors = glm.make_design_matrix(
-        rec[rec_str],
-        ts_short,
-        rec.stim,
-        rec.geo3d,
-        basis_function = glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
-        drift_order = cfg_GLM['drift_order'],
-        short_channel_method = cfg_GLM['short_channel_method']
+    # dm, channel_wise_regressors = glm.make_design_matrix(
+    #     rec[rec_str],
+    #     ts_short,
+    #     rec.stim,
+    #     rec.geo3d,
+    #     basis_function = glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
+    #     drift_order = cfg_GLM['drift_order'],
+    #     short_channel_method = cfg_GLM['short_channel_method']
+    # )
+    
+    dm = (
+    glm.design_matrix.hrf_regressors(
+        rec[rec_str], rec.stim, glm.GaussianKernels(cfg_GLM['cfg_hrf']['t_pre'], cfg_GLM['cfg_hrf']['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std'])
     )
-    
+    & glm.design_matrix.drift_regressors(rec[rec_str], drift_order = cfg_GLM['drift_order'])
+    & glm.design_matrix.closest_short_channel_regressor(rec[rec_str], ts_short, rec.geo3d)
+)
+
     #### fit the model 
-    betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
-    
-    pred_all = glm.predict(rec[rec_str], betas, dm, channel_wise_regressors)
+    #pdb.set_trace()
+    #betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
+    results = glm.fit(rec[rec_str], dm, noise_model= cfg_GLM['noise_model'])  #, max_jobs=1)
+
+    betas = results.sm.params
+
+    pred_all = glm.predict(rec[rec_str], betas, dm)  #, channel_wise_regressors)
     pred_all = pred_all.pint.quantify('micromolar')
     
     residual = rec[rec_str] - pred_all
@@ -475,9 +488,8 @@ def GLM(rec, rec_str, cfg_GLM):
     pred_hrf = glm.predict(
                             rec[rec_str],
                             betas.sel(regressor=betas.regressor.str.startswith("HRF ")),
-                            dm,
-                            channel_wise_regressors
-                        )
+                            dm ) #,
+                            #channel_wise_regressors)
     
     pred_hrf = pred_hrf.pint.quantify('micromolar')
     
