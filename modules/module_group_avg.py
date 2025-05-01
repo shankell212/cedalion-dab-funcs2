@@ -162,8 +162,7 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             
             mse_t_o = mse_t.copy()
             # making channels with very small variance across epochs "have less variance" 
-            # !!! remove :
-            mse_t = xr.where(mse_t < cfg_mse['mse_min_thresh'], cfg_mse['mse_min_thresh'], mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
+            # mse_t = xr.where(mse_t < cfg_mse['mse_min_thresh'], cfg_mse['mse_min_thresh'], mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
             
             mse_t = mse_t.assign_coords(trial_type = [trial_type]) # assign coords to match curr trial type
             mse_t_o = mse_t_o.assign_coords(trial_type = [trial_type]) 

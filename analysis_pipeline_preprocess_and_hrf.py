@@ -34,13 +34,7 @@ warnings.filterwarnings('ignore')
 # DQR
     # in future save pruned channel / other dqr quantitative values in a csv file 
         # will decide what to save as a group 
-        
-
-# save cfgs in json (already doing) & load it into down stream processing (img recon) 
-    # will b .yml in future
-    
 # image recon plots will be in dev - update
-# BC thread or email -- pipeline .yml file   instead of json, will this be issue
 
 # %% 
 ##############################################################################
@@ -189,19 +183,19 @@ importlib.reload(pfDAB)
 
 # File naming stuff
 p_save_str = ''
-if cfg_motion_correct['flag_do_imu_glm']:  # to identify if data is pruned or unpruned
+if cfg_motion_correct['flag_do_imu_glm']:  
     p_save_str =  p_save_str + '_imuGLM' 
 else:
     p_save_str =  p_save_str
-if cfg_motion_correct['flag_do_tddr']:  # to identify if data is pruned or unpruned
+if cfg_motion_correct['flag_do_tddr']: 
     p_save_str =  p_save_str + '_tddr' 
 else:
     p_save_str =  p_save_str 
-if cfg_preprocess['flag_do_GLM_filter']:  # to identify if data is pruned or unpruned
+if cfg_preprocess['flag_do_GLM_filter']:  
     p_save_str =  p_save_str + '_GLMfilt' 
 else:
     p_save_str =  p_save_str   
-if cfg_preprocess['flag_prune_channels']:  # to identify if data is pruned or unpruned
+if cfg_preprocess['flag_prune_channels']:  
     p_save_str =  p_save_str + '_pruned' 
 else:
     p_save_str =  p_save_str + '_unpruned' 

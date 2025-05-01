@@ -206,7 +206,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                 # maybe also pass channels pruned array
             # GLM filtering step
             if cfg_preprocess['flag_do_GLM_filter']:
-                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'])
+                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'], pruned_chans)
                 
                 recTmp['od_corrected'] = cedalion.nirs.conc2od(recTmp['conc'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
                 recTmp['od_corrected'] = recTmp['od_corrected'].transpose('channel', 'wavelength', 'time') # need to transpose to match recTmp['od'] bc conc2od switches the axes
@@ -308,14 +308,14 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
 
 #%%
 
-def prune_mask_ts(ts, channels_to_nan):
+def prune_mask_ts(ts, pruned_chans):
     '''
     Function to mask pruned channels with NaN .. essentially repruning channels
     Parameters
     ----------
     ts : data array
         time series from rec[rec_str].
-    channels_to_nan : list or array
+    pruned_chans : list or array
         list or array of channels that were pruned prior.
 
     Returns
@@ -324,8 +324,15 @@ def prune_mask_ts(ts, channels_to_nan):
         time series that has been "repruned" or masked with data for the pruned channels as NaN.
 
     '''
-    mask = np.isin(ts.channel.values, channels_to_nan)
-    mask_expanded = mask[:, None, None]
+    mask = np.isin(ts.channel.values, pruned_chans)
+    
+    if ts.ndim == 3 and ts.shape[0] == len(ts.channel):
+        mask_expanded = mask[:, None, None]  # (chan, wav, time)
+    elif ts.ndim == 3 and ts.shape[1] == len(ts.channel):
+        mask_expanded = mask[None, :, None]  # (chrom, chan, time)
+    else:
+        raise ValueError("Expected input shape to be either (chan, dim, time) or (dim, chan, time)")
+
     ts_masked = ts.where(~mask_expanded, np.nan)
     return ts_masked
 
@@ -446,11 +453,15 @@ def pruneChannels( rec, cfg_prune ):
     return rec, chs_pruned, sci, psp
 
 
-def GLM(rec, rec_str, cfg_GLM):
+def GLM(rec, rec_str, cfg_GLM, pruned_chans):
     
+    # get pruned data for SSR
+    rec_pruned = prune_mask_ts(rec[rec_str], pruned_chans)
+    #rec_pruned = rec_pruned.where( ~rec_pruned].isnull(), 1e-18 )   # quick fix 
+
     #### build design matrix
     ts_long, ts_short = cedalion.nirs.split_long_short_channels(
-        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']
+        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']  # !!! change to rec_pruned once NaN prob fixed
     )
     
     # build regressors
@@ -463,6 +474,7 @@ def GLM(rec, rec_str, cfg_GLM):
     #     drift_order = cfg_GLM['drift_order'],
     #     short_channel_method = cfg_GLM['short_channel_method']
     # )
+    
     
     dm = (
     glm.design_matrix.hrf_regressors(
