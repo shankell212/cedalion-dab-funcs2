@@ -176,7 +176,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     slope_corrected = quant_slope(recTmp, "od_corrected", True)  # Get slopes after correction before bandpass filtering
             
             
-            recTmp['od_corrected'] = recTmp['od_corrected'].where( ~recTmp['od_corrected'].isnull(), 1e-18 )  # replace any NaNs after TDDR
+            recTmp['od_corrected'] = recTmp['od_corrected'].where( ~recTmp['od_corrected'].isnull(), 0)  #1e-18 )  # replace any NaNs after TDDR
             
             # GVTD for Corrected od before bandpass filtering
             amp_corrected = recTmp['od_corrected'].copy()  
@@ -202,11 +202,10 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             # Conc
             recTmp['conc'] = cedalion.nirs.od2conc(recTmp['od_corrected'], recTmp.geo3d, dpf, spectrum="prahl")
             
-            # !!! NEED pruned data --- so that mean short sep data does not noise
-                # maybe also pass channels pruned array
             # GLM filtering step
             if cfg_preprocess['flag_do_GLM_filter']:
-                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'], pruned_chans)
+                
+                recTmp = GLM(recTmp, 'conc', cfg_preprocess['cfg_GLM'], pruned_chans) # passing in pruned channels
                 
                 recTmp['od_corrected'] = cedalion.nirs.conc2od(recTmp['conc'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
                 recTmp['od_corrected'] = recTmp['od_corrected'].transpose('channel', 'wavelength', 'time') # need to transpose to match recTmp['od'] bc conc2od switches the axes
@@ -241,41 +240,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
             #
             # Organize the processed data
             #
-            
-            # #if 'rec' not in vars() and file_idx == 0:
-            # if subj_idx == 0 and file_idx == 0:
-            #     rec = []
-            #     chs_pruned_subjs = []
-            #     slope_base_subjs = []
-            #     slope_corrected_subjs = []
-            #     gvtd_corrected_subjs = []
-            #     snr0_subjs = []
-            #     snr1_subjs = []
-
-            #     rec.append( [recTmp] )
-            #     chs_pruned_subjs.append( [chs_pruned] )
-            #     slope_base_subjs.append( [slope_base] )
-            #     slope_corrected_subjs.append( [slope_corrected] )
-            #     gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
-            #     snr0_subjs.append( [snr0] )
-            #     snr1_subjs.append( [snr1] )
-            # elif file_idx == 0:
-            #     rec.append( [recTmp] )
-            #     chs_pruned_subjs.append( [chs_pruned] )
-            #     slope_base_subjs.append( [slope_base] )
-            #     slope_corrected_subjs.append( [slope_corrected] )
-            #     gvtd_corrected_subjs.append( [np.nanmean(recTmp.aux_ts['gvtd_corrected'].values)] )
-            #     snr0_subjs.append( [snr0] )
-            #     snr1_subjs.append( [snr1] )
-            # else:
-            #     rec[subj_idx].append( recTmp )
-            #     chs_pruned_subjs[subj_idx].append( chs_pruned )
-            #     slope_base_subjs[subj_idx].append( slope_base )
-            #     slope_corrected_subjs[subj_idx].append( slope_corrected )
-            #     gvtd_corrected_subjs[subj_idx].append( np.nanmean(recTmp.aux_ts['gvtd_corrected'].values) )
-            #     snr0_subjs[subj_idx].append( snr0 )
-            #     snr1_subjs[subj_idx].append( snr1 )
-                
                 
             if file_idx == 0:
                 rec.append([recTmp])
@@ -456,8 +420,9 @@ def pruneChannels( rec, cfg_prune ):
 def GLM(rec, rec_str, cfg_GLM, pruned_chans):
     
     # get pruned data for SSR
-    rec_pruned = prune_mask_ts(rec[rec_str], pruned_chans)
-    #rec_pruned = rec_pruned.where( ~rec_pruned].isnull(), 1e-18 )   # quick fix 
+    rec_pruned = prune_mask_ts(rec[rec_str], pruned_chans) # !!! how is this affected when using pruned data
+    
+    rec_pruned = rec_pruned.where( ~rec_pruned.isnull(), 0)  #1e-18 )   # set nan to 0
 
     #### build design matrix
     ts_long, ts_short = cedalion.nirs.split_long_short_channels(
