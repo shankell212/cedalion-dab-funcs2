@@ -62,7 +62,7 @@ def load_head_model(head_model='ICBM152', with_parcels=True):
     return head, PARCEL_DIR
 
 
-def load_probe(probe_path, snirf_name ='fullhead_56x144_System2_4NN.snirf', head_model='ICBM152'):
+def load_probe(probe_path, snirf_name ='fullhead_56x144_System2.snirf', head_model='ICBM152'):
         
     with open(os.path.join(probe_path, 'fw',  head_model, 'Adot.pkl'), 'rb') as f:
         Adot = pickle.load(f)
@@ -96,7 +96,7 @@ def get_Adot_scaled(Adot, wavelengths, BRAIN_ONLY=False):
     A[nchannel:, :nvertices] = E.sel(chromo="HbO", wavelength=wl2).values * Adot.sel(wavelength=wl2) # noqa: E501
     A[nchannel:, nvertices:] = E.sel(chromo="HbR", wavelength=wl2).values * Adot.sel(wavelength=wl2) # noqa: E501
 
-    A = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
+    A = xr.DataArray(A, dims=("measurement", "flat_vertex"))
     A = A.assign_coords({"parcel" : ("flat_vertex", np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
                          "is_brain" : ("flat_vertex", np.concatenate((Adot.coords['is_brain'].values, Adot.coords['is_brain'].values)))})
     
@@ -158,20 +158,18 @@ def _calculate_W_direct(A, alpha_meas=0.1, alpha_spatial=0.01, BRAIN_ONLY=False,
         else:
             W = D @ np.linalg.inv(F  + lambda_meas * np.eye(A.shape[0]) )
         
-        W_xr = xr.DataArray(W, dims=("flat_vertex", "flat_channel"))
-        D_xr = xr.DataArray(D, dims=("flat_vertex", "flat_channel"))
+        W_xr = xr.DataArray(W, dims=("flat_vertex", "measurement"))
+        D_xr = xr.DataArray(D, dims=("flat_vertex", "measurement"))
 
         if 'parcel' in A_coords:
-            W_xr = W_xr.assign_coords({"parcel" : ("flat_vertex", A_coords['parcel'].values),
-                                   "is_brain": ("flat_vertex", A_coords['is_brain'].values)})
-            D_xr = D_xr.assign_coords({"parcel" : ("flat_vertex", A_coords['parcel'].values),
-                                   "is_brain": ("flat_vertex", A_coords['is_brain'].values)})
+            W_xr = W_xr.assign_coords({"parcel" : ("flat_vertex", A_coords['parcel'].values)})
+            D_xr = D_xr.assign_coords({"parcel" : ("flat_vertex", A_coords['parcel'].values)})
         if 'is_brain' in A_coords:
             W_xr = W_xr.assign_coords({"is_brain": ("flat_vertex", A_coords['is_brain'].values)}) 
             D_xr = D_xr.assign_coords({"is_brain": ("flat_vertex", A_coords['is_brain'].values)})
 
         
-        F_xr = xr.DataArray(F, dims=("flat_channel1", "flat_channel2"))
+        F_xr = xr.DataArray(F, dims=("measurement1", "measurement2"))
 
     return W_xr, D_xr, F_xr
 
@@ -218,7 +216,11 @@ def _calculate_W_indirect(A, alpha_meas=0.1, alpha_spatial=0.01, BRAIN_ONLY=Fals
 #%% do image recon
 def _get_image_brain_scalp_direct(y, W, A, SB=False, G=None):
     
-    X = W.values @ y.values
+    try:
+        X = W.values @ y.values
+    except:
+        X = W @ y
+
     split = len(X)//2
 
     if SB:
@@ -265,10 +267,15 @@ def _get_image_brain_scalp_indirect(y, W, A, SB=False, G=None):
      W_indirect_wl1 = W.isel(wavelength=1)
      
      y_wl0 = y[:split]
-     X_wl0 = W_indirect_wl0.values @ y_wl0.values
-   
      y_wl1 = y[split:]
-     X_wl1 = W_indirect_wl1.values @ y_wl1.values
+
+     try:
+        X_wl0 = W_indirect_wl0.values @ y_wl0.values
+        X_wl1 = W_indirect_wl1.values @ y_wl1.values
+     except:
+        X_wl0 = W_indirect_wl0 @ y_wl0
+        X_wl1 = W_indirect_wl1 @ y_wl1   
+        
              
      if SB:
          X_wl0 = sbf.go_from_kernel_space_to_image_space_indirect(X_wl0, G)
@@ -313,54 +320,13 @@ def _get_image_brain_scalp_indirect(y, W, A, SB=False, G=None):
 def do_image_recon(od, head, Adot, C_meas_flag, C_meas, wavelength, BRAIN_ONLY, DIRECT,
                    SB, cfg_sbf, alpha_spatial, alpha_meas, D, F, G ):
     
-    if len(od.dims) == 2: # not a time series else it is a time series
-        pruning_mask = ~(od.isel(wavelength=0).isnull() | od.isel(wavelength=1).isnull())
-    elif 'reltime' in od.dims:
-        pruning_mask = ~(od.isel(wavelength=0, reltime=0).isnull() | od.isel(wavelength=1, reltime=0).isnull())
-    else:
-        pruning_mask = ~(od.isel(wavelength=0).mean('time').isnull() | od.isel(wavelength=1).mean('time').isnull())
-
-    if C_meas is None:
-        if BRAIN_ONLY:
-            Adot_pruned = Adot[pruning_mask.values, Adot.is_brain.values, :] 
-        else:
-            Adot_pruned = Adot[pruning_mask.values, :, :]
-        
-        if len(od.dims) ==2:
-            od_mag_pruned = od[:,pruning_mask.values].stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
-        else:
-            od_mag_pruned = od[:,pruning_mask.values,:].stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
-
-        # od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
-        # od_mag_pruned = od_mag.dropna('measurement')
-    else: # don't prune anything if C_meas is not None as we use C_meas to essentially prune
-          # but we make sure the corresponding elements of C_meas are set to BAD values
-        if BRAIN_ONLY:
-            Adot_pruned = Adot[:, Adot.is_brain.values, :] 
-        else:
-            Adot_pruned = Adot
-            
-        od_mag_pruned = od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
-        n_chs = od.channel.size
-        if od_mag_pruned.dims == 2:
-            od_mag_pruned[:,np.where(~pruning_mask.values)[0]] = 0
-            od_mag_pruned[:,np.where(~pruning_mask.values)[0]+n_chs] = 0
-        else:
-            od_mag_pruned[np.where(~pruning_mask.values)[0]] = 0
-            od_mag_pruned[np.where(~pruning_mask.values)[0]+n_chs] = 0
-
-        mse_val_for_bad_data = 1e1  # FIXME: this should be passed here and to group_avg
-        # FIXME: I assume C_meas is 1D. If it is 2D then I need to do this to the columns and rows
-        C_meas[np.where(~pruning_mask.values)[0]] = mse_val_for_bad_data
-        C_meas[np.where(~pruning_mask.values)[0] + n_chs] = mse_val_for_bad_data
-
     
     if DIRECT:
-        Adot_stacked = get_Adot_scaled(Adot_pruned, wavelength)
+        Adot_stacked = get_Adot_scaled(Adot, wavelength)
         
         if SB:
             if G is None:
-                M = sbf.get_sensitivity_mask(Adot_pruned, cfg_sbf['mask_threshold'], 1)
+                M = sbf.get_sensitivity_mask(Adot, cfg_sbf['mask_threshold'], 1)
                 G = sbf.get_G_matrix(head, M, threshold_brain=cfg_sbf['threshold_brain'],
                                              threshold_scalp = cfg_sbf['threshold_scalp'],
                                              sigma_brain=cfg_sbf['sigma_brain'],
@@ -372,24 +338,24 @@ def do_image_recon(od, head, Adot, C_meas_flag, C_meas, wavelength, BRAIN_ONLY, 
         W, D, F = calculate_W(Adot_stacked, alpha_meas=alpha_meas, alpha_spatial=alpha_spatial,
                               C_meas_flag=C_meas_flag, C_meas=C_meas, DIRECT=DIRECT, BRAIN_ONLY=BRAIN_ONLY, D=D, F=F)
        
-        X = _get_image_brain_scalp_direct(od_mag_pruned, W, Adot, SB=SB, G=G)
+        X = _get_image_brain_scalp_direct(od, W, Adot, SB=SB, G=G)
     
             
     else:
         if SB:
             if G is None:
-                M = sbf.get_sensitivity_mask(Adot_pruned, cfg_sbf['mask_threshold'], 1)
+                M = sbf.get_sensitivity_mask(Adot, cfg_sbf['mask_threshold'], 1)
                 G = sbf.get_G_matrix(head, M, threshold_brain=cfg_sbf['threshold_brain'],
                                              threshold_scalp = cfg_sbf['threshold_scalp'],
                                              sigma_brain=cfg_sbf['sigma_brain'],
                                              sigma_scalp=cfg_sbf['sigma_scalp'])
             
-            H = sbf.get_H(G, Adot_pruned)
-            Adot_pruned = H.copy()
+            H = sbf.get_H(G, Adot)
+            Adot = H.copy()
             
-        W, D, F = calculate_W(Adot_pruned, alpha_meas=alpha_meas, alpha_spatial=alpha_spatial,
+        W, D, F = calculate_W(Adot, alpha_meas=alpha_meas, alpha_spatial=alpha_spatial,
                               C_meas_flag=C_meas_flag, C_meas=C_meas, DIRECT=DIRECT, BRAIN_ONLY=BRAIN_ONLY, D=D, F=F)
-        X = _get_image_brain_scalp_indirect(od_mag_pruned, W, Adot, SB=SB, G=G)
+        X = _get_image_brain_scalp_indirect(od, W, Adot, SB=SB, G=G)
 
       
             
@@ -427,9 +393,9 @@ def get_image_noise(C_meas, X, W, SB=False, DIRECT=True, G=None):
         cov_img_diag =  np.vstack(cov_img_lst) 
         E = nirs.get_extinction_coefficients('prahl', W.wavelength)
         einv = xrutils.pinv(E)
-        
-        cov_img_tmp = einv.values @ np.sqrt (cov_img_diag) 
-        cov_img_diag = cov_img_tmp**2 
+
+        cov_img_diag = einv.values**2 @ cov_img_diag
+
         
     noise = X.copy()
     noise.values = cov_img_diag
@@ -552,7 +518,7 @@ def do_image_recon_DB( hrf_od = None, head = None, Adot = None, C_meas = None, w
     A[nchannel:, :nvertices] = ec.sel(chromo="HbO", wavelength=wl2).values * Adot_pruned.sel(wavelength=wl2) # noqa: E501
     A[nchannel:, nvertices:] = ec.sel(chromo="HbR", wavelength=wl2).values * Adot_pruned.sel(wavelength=wl2) # noqa: E501
 
-    A = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
+    A = xr.DataArray(A, dims=("measurement", "flat_vertex"))
     A = A.assign_coords({"parcel" : ("flat_vertex", np.concatenate((Adot_pruned.coords['parcel'].values, Adot_pruned.coords['parcel'].values)))})
 
 
@@ -634,7 +600,7 @@ def do_image_recon_DB( hrf_od = None, head = None, Adot = None, C_meas = None, w
     alpha_meas = cfg_img_recon['alpha_meas']
     print(f'   Doing image recon with alpha_meas = {alpha_meas}')
     if cfg_img_recon['BRAIN_ONLY'] and W is None:
-        Adot_stacked = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
+        Adot_stacked = xr.DataArray(A, dims=("measurement", "flat_vertex"))
         W = pseudo_inverse_stacked(Adot_stacked, alpha=alpha_meas)
         W = W.assign_coords({"chromo" : ("flat_vertex", ["HbO"]*nvertices  + ["HbR"]* nvertices)})
         W = W.set_xindex("chromo")
