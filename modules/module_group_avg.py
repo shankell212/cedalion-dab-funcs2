@@ -150,6 +150,8 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             blockaverage.loc[trial_type, channels.isel(channel=idx_bad2),:,:] = cfg_mse['blockaverage_val']
             
             # set the minimum value of mse_t
+            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t)
+
             if 'chromo' in ts.dims:
                 mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')
             else:

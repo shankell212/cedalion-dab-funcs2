@@ -83,7 +83,7 @@ cfg_img_recon = {
     'flag_save_img_results' : True
     }
 
-mse_min_thresh = 1e-3 
+mse_min_thresh = 1e-6
 
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data')
 
