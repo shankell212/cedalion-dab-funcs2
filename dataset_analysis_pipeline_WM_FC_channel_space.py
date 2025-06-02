@@ -262,7 +262,41 @@ else:
 import importlib
 importlib.reload(pfDAB_img)
 
+import statsmodels.api as sm
+from statsmodels.tsa.stattools import arma_order_select_ic
+
+
+y = conc_ts[0,300,:].values  
+t = conc_ts.time.values
+
+# order = arma_order_select_ic(y, max_ar=20, ic='aic')['aic_min_order'][0]
+# order
+
+ar_order = 7
+model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
+result = model.fit()
+residuals = result.resid
+
+# plot y
+p.figure(figsize=(10, 4))
+#p.plot(t, y, label='Time Series')
+p.plot(t[900:1000], residuals[900:1000], label='Time Series')
+p.show()
+
+# Plot original and prewhitened
+p.figure(figsize=(10,4))
+p.subplot(121)
+p.acorr(y, maxlags=40)
+p.title("Original")
+p.subplot(122)
+p.acorr(residuals, maxlags=40)
+p.title("Prewhitened Residuals")
+p.tight_layout()
+p.show()
+
+# %%
 flag_do_bp_filter_on_od = True
+flag_do_AR_filter_on_conc = False
 flag_do_gms_chromo = True
 
 flag_include_full_ts = True
@@ -317,6 +351,24 @@ for idx_subj, curr_subj in enumerate(cfg_dataset['subj_ids']):
             coords={"wavelength": od_ts.wavelength},
         )
         conc_ts = cedalion.nirs.od2conc(od_ts, rec[idx_subj][idx_file].geo3d, dpf, spectrum="prahl")
+
+        # Do the AR filtering
+        if flag_do_AR_filter_on_conc:
+            ar_order = 7
+            conc_ts_tmp = conc_ts.isel(time=slice(ar_order, None)).copy()  # remove the first ar_order points
+            for idx_chromo, chromo in enumerate(conc_ts.chromo):
+                for idx_ch, ch in enumerate(conc_ts.channel):
+                    y = conc_ts.sel(chromo=chromo, channel=ch).values
+
+                    # Fit AR model if y has no NaNs or Infs
+                    if np.all(np.isfinite(y)):
+                        model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
+                        result = model.fit()
+                        residuals = result.resid * units.micromolar  # convert back to micromolar
+
+                        # Store the residuals back into the time series
+                        conc_ts_tmp.loc[dict(chromo=chromo, channel=ch)] = xr.DataArray(residuals, dims='time', coords={'time': conc_ts_tmp.time})
+            conc_ts = conc_ts_tmp.copy()
 
         # Global mean subtraction for each chromo
         if flag_do_gms_chromo:
@@ -819,6 +871,9 @@ foo = foo.reshape((n_channels,n_channels))
 node_angles = circular_layout(
     unique_parcels_list, node_order, start_pos=90, group_boundaries=[0, len(unique_parcels_list) / 2]
 )
+
+# colormap for 17networks
+
 
 # make label_colors from the FreeSurfer parcellation
 label_colors = np.zeros((len(unique_parcels_list), 4))
