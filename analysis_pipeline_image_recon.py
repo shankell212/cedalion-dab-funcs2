@@ -68,16 +68,17 @@ cfg_sb = {
 
 
 cfg_img_recon = {
-    'probe_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/probes/NN22_WHHD/12NN/",  #/fw ?
+    'probe_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/probes/NN22_WHHD/12NN/",  
+    #'probe_dir' :  "/projectnb/nphfnirs/s/users/lcarlton/DATA/probes/NN22_WHHD/12NN/",
     'head_model' : 'ICBM152',
-    'img_recon_on_group' : False,
-    't_win' : (10, 20), 
-    'DIRECT' : False,  # If true, does direct method, False = does indirect
+    #'img_recon_on_group' : False,
+    't_win' : (4, 7),   # (10, 20), 
+    'DIRECT' : True,  # If true, does direct method, False = does indirect
     'flag_Cmeas' : True,
     'BRAIN_ONLY' : False,
-    'SB' : True,    # spatial basis
+    'SB' : False,    # spatial basis
     'alpha_meas' : 1e-2,  # measurement regularization
-    'alpha_spatial' : 1e-2,    #  spatial reg , small pushes deeper into the brain   -- use 1e-2 WITH SB, 1e-3 WITHOUT SB
+    'alpha_spatial' : 1e-3,    #  spatial reg , small pushes deeper into the brain   -- use 1e-2 WITH SB, 1e-3 WITHOUT SB
     'spectrum' : 'prahl',
     'cfg_sb' : cfg_sb,
     'flag_save_img_results' : True
@@ -87,7 +88,6 @@ mse_min_thresh = 1e-6
 
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data')
 
-# !!! SAVE image recon configs in another json 
 # !!! ADD flag for if doing image recon on ts or hrf mag ?
 
 
@@ -142,7 +142,7 @@ import importlib
 importlib.reload(img_recon)
 
 head, PARCEL_DIR = img_recon.load_head_model(cfg_img_recon['head_model'], with_parcels=False)
-Adot, meas_list, geo3d, amp = img_recon.load_probe(cfg_img_recon['probe_dir'], snirf_name='fullhead_56x144_NN22_System1.snirf')
+Adot, meas_list, geo3d, amp = img_recon.load_probe(cfg_img_recon['probe_dir'], snirf_name='fullhead_56x144_NN22_System1.snirf') #snirf_name = "fullhead_56x144_System2.snirf")   #snirf_name='fullhead_56x144_NN22_System1.snirf')
 
 
 ec = cedalion.nirs.get_extinction_coefficients('prahl', Adot.wavelength)
@@ -304,20 +304,22 @@ der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['der
 if not os.path.exists(der_dir):
     os.makedirs(der_dir)
 
-# if cfg_img_recon['SB']:
-#     filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
-#     print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}_sigma_brain_{cfg_sb["sigma_brain"]}_sigma_scalp_{cfg_sb["sigma_scalp"]}.pkl.gz')
-#     file = gzip.GzipFile(filepath, 'wb')
-#     file.write(pickle.dumps(results))
-#     file.close()     
-# else:
-    
-# Save results
-filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_{p_save_str}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
-print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
-file = gzip.GzipFile(filepath, 'wb')
-file.write(pickle.dumps(results))
-file.close()     
+# if cfg_img_recon['flag_save_img_results']:
+    # if cfg_img_recon['SB']:
+    #     filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
+    #     print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}_sigma_brain_{cfg_sb["sigma_brain"]}_sigma_scalp_{cfg_sb["sigma_scalp"]}.pkl.gz')
+    #     file = gzip.GzipFile(filepath, 'wb')
+    #     file.write(pickle.dumps(results))
+    #     file.close()     
+    # else:
+        
+# # Save results
+if cfg_img_recon['flag_save_img_results']:
+    filepath = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset['derivatives_subfolder'], 'processed_data', 'image_recon', f'Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_{p_save_str}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
+    print(f'   Saving to Xs_{cfg_dataset["file_ids"][0].split("_")[0]}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial"]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas"]:.0e}_{direct_name}_{Cmeas_name}_{SB_name}.pkl.gz')
+    file = gzip.GzipFile(filepath, 'wb')
+    file.write(pickle.dumps(results))
+    file.close()     
 
 
 # for single subject image recon ---- X_mse would be what to use for single sub
@@ -337,16 +339,17 @@ save_json_path = os.path.join(save_path, 'image_recon', cfg_save_str + '.json')
 save_pickle_path = os.path.join(save_path, 'image_recon', cfg_save_str + '.pkl')
 
  
-# Save configs as json to view outside of python
-with open(os.path.join(save_json_path), "w", encoding="utf-8") as f:
-    json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
-
-# Save configs as Pickle for Python usage (preserving complex objects like Pint quantities)
-with open(save_pickle_path, "wb") as f:
-    pickle.dump(dict_cfg_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+# # Save configs as json to view outside of python
+if cfg_img_recon['flag_save_img_results']:
+    with open(os.path.join(save_json_path), "w", encoding="utf-8") as f:
+        json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
     
-print(f'  Saving config parameters to {cfg_save_str}')
-    
+    # Save configs as Pickle for Python usage (preserving complex objects like Pint quantities)
+    with open(save_pickle_path, "wb") as f:
+        pickle.dump(dict_cfg_save, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+    print(f'  Saving config parameters to {cfg_save_str}')
+        
 
 #%% build plots 
 import importlib
@@ -357,7 +360,7 @@ wl_idx = 1
 M = sbf.get_sensitivity_mask(Adot, threshold, wl_idx)
 SAVE = True
 flag_hbo_list = [True, False]
-flag_brain_list = [True, False]
+flag_brain_list = [True]   #, False]
 flag_img_list = ['mag', 'tstat', 'noise'] #, 'noise'
     
 flag_condition_list = cfg_hrf['stim_lst']
