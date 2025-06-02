@@ -900,3 +900,59 @@ def plot_image_recon( X, head, shape, iax,clim=(0,1), flag_hbx='hbo_brain', view
 
     return p0
 
+
+
+def get_Adot_parcels( Adot = None ):
+
+    # reduce parcels to 17 network parcels plus 'Background+Freesurfer...'
+    # get the unique 17 network parcels and remove non-brain parcels
+    unique_parcels = Adot.groupby('parcel').sum('vertex').parcel
+    unique_parcels = unique_parcels.sel(parcel=unique_parcels.parcel != 'scalp')
+    unique_parcels = unique_parcels.sel(parcel=unique_parcels.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_LH')
+    unique_parcels = unique_parcels.sel(parcel=unique_parcels.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_RH')
+
+
+    parcel_list = []
+    for parcel in unique_parcels.values:
+        parcel_list.append( parcel.split('_')[0] + '_' + parcel.split('_')[-1] )
+    unique_parcels_lev1 = np.unique(parcel_list)
+
+    parcel_list_lev2 = []
+    for parcel in unique_parcels.values:
+        if parcel.split('_')[1].isdigit():
+            parcel_list_lev2.append( parcel.split('_')[0] + '_' + parcel.split('_')[-1] )
+        else:
+            parcel_list_lev2.append( parcel.split('_')[0] + '_' + parcel.split('_')[1] + '_' + parcel.split('_')[-1] )
+    unique_parcels_lev2 = np.unique(parcel_list_lev2)
+
+
+    Adot_parcels = Adot.isel(wavelength=0).groupby('parcel').sum('vertex')
+    Adot_parcels = Adot_parcels.sel(parcel=Adot_parcels.parcel != 'scalp')
+    Adot_parcels = Adot_parcels.sel(parcel=Adot_parcels.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_LH')
+    Adot_parcels = Adot_parcels.sel(parcel=Adot_parcels.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_RH')
+
+
+    Adot_parcels_lev1 = np.zeros( (Adot.shape[0], len(unique_parcels_lev1)) )
+    for ii in range( 0, len(unique_parcels_lev1) ):
+        idx1 = [i for i, x in enumerate(parcel_list) if x == unique_parcels_lev1.tolist()[ii]]
+        Adot_parcels_lev1[:,ii] = np.sum(Adot_parcels.isel(parcel=idx1).values, axis=1)
+
+    Adot_parcels_lev1_xr = xr.DataArray(
+        Adot_parcels_lev1,
+        dims=['channel','parcel'],
+        coords={'channel': Adot.channel, 'parcel': unique_parcels_lev1}
+    )
+
+
+    Adot_parcels_lev2 = np.zeros( (Adot.shape[0], len(unique_parcels_lev2)) )
+    for ii in range( 0, len(unique_parcels_lev2) ):
+        idx1 = [i for i, x in enumerate(parcel_list_lev2) if x == unique_parcels_lev2.tolist()[ii]]
+        Adot_parcels_lev2[:,ii] = np.sum(Adot_parcels.isel(parcel=idx1).values,axis=1)
+
+    Adot_parcels_lev2_xr = xr.DataArray(
+        Adot_parcels_lev2,
+        dims=['channel','parcel'],
+        coords={'channel': Adot.channel, 'parcel': unique_parcels_lev2}
+    )
+
+    return Adot_parcels_lev1_xr, Adot_parcels_lev2_xr, unique_parcels_lev1, unique_parcels_lev2
