@@ -37,11 +37,6 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
     else:
         cfg_mse = cfg_blockavg['cfg_mse_od']
         
-    
-    mse_val_for_bad_data = cfg_mse['mse_val_for_bad_data']
-    mse_amp_thresh = cfg_mse['mse_amp_thresh']
-    mse_min_thresh = cfg_mse['mse_min_thresh']
-    blockaverage_val = cfg_mse['blockaverage_val']
 
     subj_ids = cfg_dataset['subj_ids']
     n_subjects = len(rec)
@@ -108,374 +103,53 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
         
 
         blockaverage_weighted = blockaverage.copy()
-        n_epochs = epochs.shape[0]
-        n_chs = epochs.shape[2]
+        n_epochs = len(epochs.epoch)
+        n_chs = len(epochs.channel)
 
         mse_t_lst = []
         mse_t_o_lst = []
         for idxt, trial_type in enumerate(blockaverage.trial_type.values): 
     
-            foo = epochs.where(epochs.trial_type == trial_type, drop=True) - blockaverage_weighted.sel(trial_type=trial_type) # zero mean data
+            epochs_zeromean = epochs.where(epochs.trial_type == trial_type, drop=True) - blockaverage_weighted.sel(trial_type=trial_type) # zero mean data
     
             if 'chromo' in ts.dims:
-                foo_t = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+                foo_t = epochs_zeromean.stack(measurement=['channel','chromo']).sortby('chromo')
             else:
-                foo_t = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
-            foo_t = foo_t.transpose('measurement', 'reltime', 'epoch')
+                foo_t = epochs_zeromean.stack(measurement=['channel','wavelength']).sortby('wavelength')
+            foo_t = foo_t.transpose('measurement', 'reltime', 'epoch')  # !!! this does not have trial type?
             mse_t = (foo_t**2).sum('epoch') / (n_epochs - 1)**2 # this is squared to get variance of the mean, aka MSE of the mean
     
-    
-            # list of channel elements in mse corresponding to channels with amp < mse_amp_thresh
+            # set bad values in mse_t to the bad value threshold
             amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
-            idx_amp = np.where(amp < mse_amp_thresh)[0]
-            mse_t[idx_amp,:] = mse_val_for_bad_data
-            mse_t[idx_amp + n_chs,:] = mse_val_for_bad_data       # !!! make all this stuff a function? - bc repeating this
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_amp)
-            blockaverage_weighted = blockaverage_weighted.copy()
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
-            
-            
-            # look at saturated channels
-            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]   # sat chans set to 0 in chs_pruned in preprocess func
-            mse_t[idx_sat,:] = mse_val_for_bad_data
-            mse_t[idx_sat + n_chs,:] = mse_val_for_bad_data
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_sat)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel= bad_vals.channel.data)] = blockaverage_val
-            
-    
-            # where mse_t is 0, set it to mse_val_for_bad_data
-            # I am trying to handle those rare cases where the mse is 0 for some subjects and then it corrupts 1/mse
-            # FIXME: why does this happen sometimes?
+            idx_amp = np.where(amp < cfg_mse['mse_amp_thresh'])[0]
+            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
             idx_bad = np.where(mse_t == 0)[0]
             idx_bad1 = idx_bad[idx_bad<n_chs]
             idx_bad2 = idx_bad[idx_bad>=n_chs] - n_chs
-            mse_t[idx_bad] = mse_val_for_bad_data
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_bad1)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
-            bad_vals = blockaverage_weighted.isel(channel=idx_bad2)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
             
+            mse_t[:,idx_amp,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[:,idx_amp+n_chs,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[:,idx_sat,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[:,idx_sat+n_chs,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[:,idx_bad,:] = cfg_mse['mse_val_for_bad_data']
             
-            # FIXME: do I set blockaverage_weighted too?
-        
+            channels = blockaverage_weighted.channel
+            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_amp),:,:] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_sat),:,:] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_bad1),:,:] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_bad2),:,:] = cfg_mse['blockaverage_val']
+
+            blockaverage.loc[trial_type, channels.isel(channel=idx_amp),:,:] = cfg_mse['blockaverage_val']
+            blockaverage.loc[trial_type, channels.isel(channel=idx_sat),:,:] = cfg_mse['blockaverage_val']
+            blockaverage.loc[trial_type, channels.isel(channel=idx_bad1),:,:] = cfg_mse['blockaverage_val']
+            blockaverage.loc[trial_type, channels.isel(channel=idx_bad2),:,:] = cfg_mse['blockaverage_val']
+
+            
             # set the minimum value of mse_t
+            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t)
+
             if 'chromo' in ts.dims:
-                mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')
-            else:
-                mse_t = mse_t.unstack('measurement').transpose('wavelength','channel','reltime')
-                
-            mse_t = mse_t.expand_dims('trial_type')
-            source_coord = blockaverage['source']
-            mse_t = mse_t.assign_coords(source=('channel',source_coord.data))
-            detector_coord = blockaverage['detector']
-            mse_t = mse_t.assign_coords(detector=('channel',detector_coord.data))
-            
-            mse_t_o = mse_t.copy()
-            # making channels with very small variance across epochs "have less variance" 
-            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
-            
-            mse_t = mse_t.assign_coords(trial_type = [trial_type]) # assign coords to match curr trial type
-            mse_t_o = mse_t_o.assign_coords(trial_type = [trial_type]) 
-            
-            mse_t_lst.append(mse_t) # append mse_t for curr trial type to list
-            mse_t_o_lst.append(mse_t_o)
-            
-            # DONE LOOP OVER TRIAL TYPES
-        
-        mse_t_tmp = xr.concat(mse_t_lst, dim='trial_type') # concat the 2 trial types
-        mse_t = mse_t_tmp # reassign the newly appended mse_t with both trial types to mse_t 
-        mse_t_o_tmp = xr.concat(mse_t_o_lst, dim='trial_type') 
-        mse_t_o = mse_t_o_tmp 
-
-
-        # gather the blockaverage across subjects
-        if blockaverage_subj is None: 
-            blockaverage_subj = blockaverage
-            # add a subject dimension and coordinate
-            blockaverage_subj = blockaverage_subj.expand_dims('subj')
-            blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
-
-            blockaverage_mse_subj = mse_t_o.expand_dims('subj') # mse of blockaverage for each sub
-            blockaverage_mse_subj = blockaverage_mse_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
-            
-            blockaverage_mean_weighted = blockaverage_weighted / mse_t
-
-            blockaverage_mse_inv_mean_weighted = 1 / mse_t
-            
-        else:   
-            blockaverage_subj_tmp = blockaverage
-            blockaverage_subj_tmp = blockaverage_subj_tmp.expand_dims('subj')
-            blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
-            blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp], dim='subj')
-
-            blockaverage_mse_subj_tmp = mse_t_o.expand_dims('subj')
-            
-            blockaverage_mse_subj_tmp = blockaverage_mse_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
-            blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp], dim='subj') # !!! this does not have trial types
-
-
-            blockaverage_mean_weighted += blockaverage_weighted / mse_t
-
-            blockaverage_mse_inv_mean_weighted = blockaverage_mse_inv_mean_weighted + 1/mse_t 
-
-        
-        # DONE LOOP OVER SUBJECTS
-
-    # get the unweighted average
-    blockaverage_mean = blockaverage_subj.mean('subj')
-    
-    # get the weighted average
-    blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
-    
-    # get the mean mse within subjects
-    mse_mean_within_subject = 1 / blockaverage_mse_inv_mean_weighted
-    
-    blockaverage_mse_subj_tmp = blockaverage_mse_subj.copy()
-    blockaverage_mse_subj_tmp = xr.where(blockaverage_mse_subj_tmp < mse_min_thresh, mse_min_thresh, blockaverage_mse_subj_tmp)
-
-    # get the mse between subjects
-    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj_tmp
-    mse_weighted_between_subjects = mse_weighted_between_subjects_tmp.mean('subj')
-    mse_weighted_between_subjects = mse_weighted_between_subjects * mse_mean_within_subject
-    # FIXME: is it an issue that mse_mean_within_subject comes from mse_t and blockaverage_mse_subj_tmp comes from mse_t_o?
- 
-    # blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
-    blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )
-    blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
-
-    #%
-    # Plot scalp plot of mean, tstat,rsme + Plot mse hist
-    for idxt, trial_type in enumerate(blockaverage_mean_weighted.trial_type.values):         
-        plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, 
-                         blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects)
-        plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh)  # !!! not sure if these r working correctly tbh
-    
-
-    return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_subj, blockaverage_mse_subj
-
-
-
-
-def run_group_glm( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
-    
-    subj_ids_new = [s for s in cfg_dataset['subj_ids'] if s not in cfg_dataset['subj_id_exclude']]
-    
-    # Build a new list excluding the subjects in subj_id_exclude:
-    excluded = set(cfg_dataset['subj_id_exclude'])
-    new_filenm_lst = [
-        run_list for run_list in cfg_dataset['filenm_lst']
-        if run_list[0].split('_')[0].replace('sub-', '') not in excluded
-    ]
-    
-    # choose correct mse values based on if blockaveraging od or conc
-    if 'chromo' in rec[0][0][rec_str].dims:
-        cfg_mse = cfg_blockavg['cfg_mse_conc']
-    else:
-        cfg_mse = cfg_blockavg['cfg_mse_od']
-        
-    
-    mse_val_for_bad_data = cfg_mse['mse_val_for_bad_data']
-    mse_amp_thresh = cfg_mse['mse_amp_thresh']
-    mse_min_thresh = cfg_mse['mse_min_thresh']
-    blockaverage_val = cfg_mse['blockaverage_val']
-
-    subj_ids = cfg_dataset['subj_ids']
-    n_subjects = len(rec)
-    n_files_per_subject = len(rec[0])
-
-    print(f"Running group block average for trial_type = '{rec_str}'")
-
-    # loop over subjects and files
-    blockaverage_subj = None
-    for subj_idx in range( n_subjects ):
-        for file_idx in range( n_files_per_subject ):
-            
-            filenm = new_filenm_lst[subj_idx][file_idx]
-            print(f'Running {subj_idx+1} of {n_subjects} subjects not excluded : {filenm} ')
-            
-            # Check if rec_str exists for current subject
-            if rec_str not in rec[subj_idx][file_idx].timeseries:
-                print(f"{rec_str} does not exist for subject {subj_idx+1} : {filenm}. Skipping this subject/file.")
-                continue  # if rec_str does not exist, skip 
-            else:
-                ts = rec[subj_idx][file_idx][rec_str].copy()
-            
-            # copy the stim object for the given file
-            stim = rec[subj_idx][file_idx].stim.copy()
-            # select the events of interest
-            # FIXME: this needs to consider the stim_lst in the cfg_GLM
-#            stim = stim.loc[stim['trial_type'] == 'mnt']
-                
-            # shift time for appending files
-            if file_idx > 0:
-                dt = np.mean(np.diff(ts.time))
-                ts['time'] = ts.time + ts_all.time[-1] + dt
-                ts['time'] = ts.time.pint.quantify(units.s)
-                stim.onset = stim.onset + dt
-
-            # get the glm design matrix
-            # split time series into two based on channel distance
-            # ts_long, ts_short = cedalion.nirs.split_long_short_channels(
-            #     ts, rec.geo3d, distance_threshold=15 * units.mm
-            # )
-
-            dms_hrf_tmp = glm.design_matrix.hrf_regressors(
-                                ts, stim, glm.Gamma(
-                                                tau={"HbO": 0 * units.s, "HbR": 1 * units.s}, sigma={"HbO": 3 * units.s, "HbR": 3 * units.s}, T=0 * units.s
-                                                )
-                            )
-            
-            dms_drift_tmp = glm.design_matrix.drift_regressors(ts, drift_order=3)
-            # append the file_idx to the regressor name
-            file_idx_str = str(file_idx + 1).zfill(2) # add leading zero
-            dms_drift_tmp.common = dms_drift_tmp.common.assign_coords(regressor=('regressor', [x + '-' + file_idx_str for x in dms_drift_tmp.common.regressor.values]))
-
-            # MY GOAL IS TO GET DMS ACROSS ALL FILES AND THEN COMBINE THEM TO DO GLM FOR A SINGLE SUBJECT
-
-            # FIXME: can delete this
-            # # get the epochs
-            # # check if ts has dimenstion chromo
-            # if 'chromo' in ts.dims:
-            #     ts = ts.transpose('chromo', 'channel', 'time')
-            # else:
-            #     ts = ts.transpose('wavelength', 'channel', 'time')
-            # ts = ts.assign_coords(samples=('time', np.arange(len(ts.time))))
-            # ts['time'] = ts.time.pint.quantify(units.s)     
-            
-            # #
-            # # block average
-            # #
-            # epochs_tmp = ts.cd.to_epochs(
-            #                             stim,  # stimulus dataframe
-            #                             set(stim[stim.trial_type.isin(cfg_blockavg['cfg_hrf']['stim_lst'])].trial_type), # select events
-            #                             before = cfg_blockavg['cfg_hrf']['t_pre'],  # seconds before stimulus
-            #                             after = cfg_blockavg['cfg_hrf']['t_post'],  # seconds after stimulus
-            #                         )
-            
-            # FIXME: how do this for GLM
-            # # concatenate the different epochs from each file for each subject
-            # if cfg_blockavg['flag_save_each_subj']:
-            #     epochs_tmp = epochs_tmp.assign_coords(trial_type=('epoch', [x + '-' + subj_ids_new[subj_idx] for x in epochs_tmp.trial_type.values]))
-
-
-            if file_idx == 0:
-                ts_all = ts
-                dms_hrf_all = dms_hrf_tmp
-                dms_drift_all = dms_drift_tmp
-            else:
-                ts_all = xr.concat([ts_all, ts], dim='time', coords='minimal', compat='override') # ensure no reordering since times overlap
-                dms_hrf_all.common = xr.concat([dms_hrf_all.common, dms_hrf_tmp.common], dim='time', coords='minimal', compat='override') # ensure no reordering since times overlap
-                dms_drift_all = (dms_drift_all & dms_drift_tmp)
-
-            # DONE LOOP OVER FILES
-
-        # full design matrix
-        dms_all = (dms_hrf_all & dms_drift_all)
-        # set to 0 the NaN that occur when we concatenate the drift regressors
-        dms_all.common = xr.where(dms_all.common.isnull(),0,dms_all.common)
-        
-        # GLM fit
-        # FIXME: cfg option for 'ols' or 'ar_irls' etc
-        results = glm.fit(ts_all, dms_all, noise_model="ols", max_jobs=1) # ols, ar_irls
-
-        betas = results.sm.params
-        betas_cov = results.sm.cov_params()
-
-
-        # # Block Average
-        # baseline = epochs_all.sel(reltime=(epochs_all.reltime < 0)).mean('reltime')
-        # epochs = epochs_all - baseline
-        # blockaverage = epochs.groupby('trial_type').mean('epoch') # mean across all epochs
-
-
-        # get MSE for weighting across subjects
-        # FIXME: this needs to consider the stim_lst in the cfg_GLM
-        foo = betas.sel(regressor='HRF mnt')
-        blockaverage_weighted = foo.copy()
-        blockaverage_weighted = blockaverage_weighted.expand_dims('trial_type')
-        blockaverage_weighted = blockaverage_weighted.transpose( 'trial_type', 'chromo', 'channel')
-        blockaverage_weighted = blockaverage_weighted.assign_coords(trial_type=('trial_type', ['mnt']))
-        # FIXME: only do this if it needs units
-        # give units of micromolar
-        blockaverage_weighted.values = blockaverage_weighted.values * units.micromolar
-
-        # blockaverage_weighted = blockaverage.copy()
-        # n_epochs = epochs.shape[0]
-        # n_chs = epochs.shape[2]
-        n_chs = len(blockaverage_weighted.channel)
-
-
-
-        mse_t_lst = []
-        mse_t_o_lst = []
-        for idxt, trial_type in enumerate(blockaverage_weighted.trial_type.values): 
-    
-            # foo = epochs.where(epochs.trial_type == trial_type, drop=True) - blockaverage_weighted.sel(trial_type=trial_type) # zero mean data
-    
-            if 'chromo' in ts.dims:
-                foo_t = betas_cov.sel(regressor_r='HRF '+trial_type, regressor_c='HRF '+trial_type).stack(measurement=['channel', 'chromo']).sortby('chromo')
-            else:
-                foo_t = betas_cov.sel(regressor_r='HRF '+trial_type, regressor_c='HRF '+trial_type).stack(measurement=['channel','wavelength']).sortby('wavelength')
-            # foo_t = foo_t.transpose('measurement', 'reltime', 'epoch')
-            # mse_t = (foo_t**2).sum('epoch') / (n_epochs - 1)**2 # this is squared to get variance of the mean, aka MSE of the mean
-            # FIXME: only do this if it needs the units
-            foo_t.values = foo_t.values * units.micromolar**2
-            mse_t = foo_t
-    
-            # list of channel elements in mse corresponding to channels with amp < mse_amp_thresh
-            amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
-            idx_amp = np.where(amp < mse_amp_thresh)[0]
-            if 'reltime' in mse_t.dims:
-                mse_t[idx_amp,:] = mse_val_for_bad_data
-                mse_t[idx_amp + n_chs,:] = mse_val_for_bad_data       # !!! make all this stuff a function? - bc repeating this
-            else:
-                mse_t[idx_amp] = mse_val_for_bad_data
-                mse_t[idx_amp + n_chs] = mse_val_for_bad_data
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_amp)
-            blockaverage_weighted = blockaverage_weighted.copy()
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
-            
-            
-            # look at saturated channels
-            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]   # sat chans set to 0 in chs_pruned in preprocess func
-            if 'reltime' in mse_t.dims:
-                mse_t[idx_sat,:] = mse_val_for_bad_data
-                mse_t[idx_sat + n_chs,:] = mse_val_for_bad_data
-            else:
-                mse_t[idx_sat] = mse_val_for_bad_data
-                mse_t[idx_sat + n_chs] = mse_val_for_bad_data
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_sat)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel= bad_vals.channel.data)] = blockaverage_val
-            
-    
-            # where mse_t is 0, set it to mse_val_for_bad_data
-            # I am trying to handle those rare cases where the mse is 0 for some subjects and then it corrupts 1/mse
-            # FIXME: why does this happen sometimes?
-#            idx_bad = np.where(np.isnan(foo_t) | (foo_t == 0))[0]
-            idx_bad = np.where(mse_t == 0)[0]
-            idx_bad1 = idx_bad[idx_bad<n_chs]
-            idx_bad2 = idx_bad[idx_bad>=n_chs] - n_chs
-            mse_t[idx_bad] = mse_val_for_bad_data
-            # Update bad data with predetermined value
-            bad_vals = blockaverage_weighted.isel(channel=idx_bad1)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
-            bad_vals = blockaverage_weighted.isel(channel=idx_bad2)
-            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=bad_vals.channel.data)] = blockaverage_val
-            
-            
-            # FIXME: do I set blockaverage_weighted too?
-        
-            # set the minimum value of mse_t
-            if 'chromo' in ts.dims:
-                if 'reltime' in mse_t.dims:
-                    mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')
-                else:
-                    mse_t = mse_t.unstack('measurement').transpose('chromo','channel')
+                mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')  
             else:
                 mse_t = mse_t.unstack('measurement').transpose('wavelength','channel','reltime')
                 if 'reltime' in mse_t.dims:
@@ -489,32 +163,27 @@ def run_group_glm( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
             detector_coord = blockaverage_weighted['detector']
             mse_t = mse_t.assign_coords(detector=('channel',detector_coord.data))
             
-            mse_t_o = mse_t.copy()
             # making channels with very small variance across epochs "have less variance" 
-            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
+            # mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t) # where true, yeild min_thres, otherwise yield orig val in mse_t
             
             mse_t = mse_t.assign_coords(trial_type = [trial_type]) # assign coords to match curr trial type
-            mse_t_o = mse_t_o.assign_coords(trial_type = [trial_type]) 
-            
             mse_t_lst.append(mse_t) # append mse_t for curr trial type to list
-            mse_t_o_lst.append(mse_t_o)
-            
+
             # DONE LOOP OVER TRIAL TYPES
         
         mse_t_tmp = xr.concat(mse_t_lst, dim='trial_type') # concat the 2 trial types
         mse_t = mse_t_tmp # reassign the newly appended mse_t with both trial types to mse_t 
-        mse_t_o_tmp = xr.concat(mse_t_o_lst, dim='trial_type') 
-        mse_t_o = mse_t_o_tmp 
 
 
         # gather the blockaverage across subjects
         if blockaverage_subj is None: 
-            blockaverage_subj = blockaverage_weighted
+            blockaverage_subj = blockaverage
+            
             # add a subject dimension and coordinate
             blockaverage_subj = blockaverage_subj.expand_dims('subj')
             blockaverage_subj = blockaverage_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
 
-            blockaverage_mse_subj = mse_t_o.expand_dims('subj') # mse of blockaverage for each sub
+            blockaverage_mse_subj = mse_t.expand_dims('subj') # mse of blockaverage for each sub
             blockaverage_mse_subj = blockaverage_mse_subj.assign_coords(subj=[subj_ids_new[subj_idx]])
             
             blockaverage_mean_weighted = blockaverage_weighted / mse_t
@@ -527,14 +196,12 @@ def run_group_glm( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
             blockaverage_subj_tmp = blockaverage_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
             blockaverage_subj = xr.concat([blockaverage_subj, blockaverage_subj_tmp], dim='subj')
 
-            blockaverage_mse_subj_tmp = mse_t_o.expand_dims('subj')
+            blockaverage_mse_subj_tmp = mse_t.expand_dims('subj')
             
             blockaverage_mse_subj_tmp = blockaverage_mse_subj_tmp.assign_coords(subj=[subj_ids_new[subj_idx]])
             blockaverage_mse_subj = xr.concat([blockaverage_mse_subj, blockaverage_mse_subj_tmp], dim='subj') # !!! this does not have trial types
 
-
-            blockaverage_mean_weighted += blockaverage_weighted / mse_t
-
+            blockaverage_mean_weighted = blockaverage_mean_weighted +  blockaverage_weighted / mse_t
             blockaverage_mse_inv_mean_weighted = blockaverage_mse_inv_mean_weighted + 1/mse_t 
 
         
@@ -543,35 +210,37 @@ def run_group_glm( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     # get the unweighted average
     blockaverage_mean = blockaverage_subj.mean('subj')
     
-    # get the weighted average
-    blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
+    # get the weighted average  (old)
+    #blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
     
     # get the mean mse within subjects
     mse_mean_within_subject = 1 / blockaverage_mse_inv_mean_weighted
-    
-    blockaverage_mse_subj_tmp = blockaverage_mse_subj.copy()
-    blockaverage_mse_subj_tmp = xr.where(blockaverage_mse_subj_tmp < mse_min_thresh, mse_min_thresh, blockaverage_mse_subj_tmp)
 
     # get the mse between subjects
-    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj_tmp
+    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean)**2 / blockaverage_mse_subj_tmp   # was -blockaverage_mean_weighted
     mse_weighted_between_subjects = mse_weighted_between_subjects_tmp.mean('subj')
     mse_weighted_between_subjects = mse_weighted_between_subjects * mse_mean_within_subject
-    # FIXME: is it an issue that mse_mean_within_subject comes from mse_t and blockaverage_mse_subj_tmp comes from mse_t_o?
  
-    # blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
-    blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )
-    blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
+    # get the weighted average
+    mse_btw_within_sum_subj = blockaverage_mse_subj + mse_weighted_between_subjects
+    denom = (1/mse_btw_within_sum_subj).sum('subj')
+    
+    blockaverage_mean_weighted = (blockaverage_subj / mse_btw_within_sum_subj).sum('subj')
+    blockaverage_mean_weighted = blockaverage_mean_weighted / denom
+    
+    mse_total = 1/denom
+    
+    total_stderr_blockaverage = np.sqrt( mse_total )
+    total_stderr_blockaverage = total_stderr_blockaverage.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
 
-    #%
     # Plot scalp plot of mean, tstat,rsme + Plot mse hist
     for idxt, trial_type in enumerate(blockaverage_mean_weighted.trial_type.values):         
         plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, 
-                         blockaverage_stderr_weighted, mse_mean_within_subject, mse_weighted_between_subjects)
+                         total_stderr_blockaverage, mse_mean_within_subject, mse_weighted_between_subjects)
         plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh)  # !!! not sure if these r working correctly tbh
     
 
-    return blockaverage_mean, blockaverage_mean_weighted, blockaverage_stderr_weighted, blockaverage_subj, blockaverage_mse_subj
-
+    return blockaverage_mean, blockaverage_mean_weighted, total_stderr_blockaverage, blockaverage_subj, blockaverage_mse_subj
 
 
 #%% Plotting func

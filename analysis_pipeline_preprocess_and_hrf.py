@@ -22,6 +22,7 @@ import module_load_and_preprocess as pfDAB
 import module_plot_DQR as pfDAB_dqr
 import module_group_avg as pfDAB_grp_avg    
 import module_ERBM_ICA as pfDAB_ERBM
+import module_image_recon as img_recon 
 
 # Turn off all warnings
 import warnings
@@ -33,13 +34,7 @@ warnings.filterwarnings('ignore')
 # DQR
     # in future save pruned channel / other dqr quantitative values in a csv file 
         # will decide what to save as a group 
-        
-
-# save cfgs in json (already doing) & load it into down stream processing (img recon) 
-    # will b .yml in future
-    
 # image recon plots will be in dev - update
-# BC thread or email -- pipeline .yml file   instead of json, will this be issue
 
 # %% 
 ##############################################################################
@@ -51,11 +46,14 @@ importlib.reload(pfDAB_grp_avg)
 
 # %% Initial root directory and analysis parameters
 ##############################################################################
+# probe_dir = "/projectnb/nphfnirs/s/users/lcarlton/DATA/probes/NN22_WHHD/12NN/"
+# Adot, meas_list, geo3d, amp = img_recon.load_probe(probe_dir, snirf_name='fullhead_56x144_System2.snirf')
+
 
 cfg_hrf = {
     'stim_lst' : ['right', 'left'],       #['ST', 'DT'], 
     't_pre' : 2*units.s,  # 5 *units.s, 
-    't_post' : 16*units.s,   # 33 *units.s
+    't_post' : 13*units.s,   # 33 *units.s
     #'t_post' : [ 33, 33 ] *units.s   # !!! GLM does not let you have different time ranges for diff stims right now
     }
 
@@ -64,8 +62,9 @@ cfg_dataset = {
     'root_dir' : "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/", 
     #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'],
     'subj_ids' : ['538', '547', '549', '568', '577', '580', '581', '583', '586', '587', '588', '592', '613', '618', '619', '621', '633'],   # BS
+    #'subj_ids' : ['633'],
     'file_ids' : ['BS_run-01', 'BS_run-02', 'BS_run-03'],
-    'subj_id_exclude' : ['538', '547', '549', '568', '577', '580', '581', '583'],   # 577, 580 and 583 all have 1220 chans???   #[10, 14, 16, 17, 18],  # old numbering: ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
+    'subj_id_exclude' : ['538', '547', '549', '568', '581', '577', '580', '583'],   # 577, 580 and 583 all have 1220 chans???   #[10, 14, 16, 17, 18],  # old numbering: ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
     'cfg_hrf' : cfg_hrf,
     'derivatives_subfolder' : 'Shannon'    # if '' (empty string), will save in normal derivatives folder, otherwise will put all saved stuff in your subfolder under derivs
 }
@@ -75,11 +74,6 @@ cfg_dataset['filenm_lst'] = [               # Add 'filenm_lst' separately after 
     for subj_id in cfg_dataset['subj_ids']
 ]
 
-# cfg_dataset['filenm_lst'] = [             # Add 'filenm_lst' separately after cfg_dataset is initialized
-#     [f"sub-{subj_id}_task-{file_id}_nirs"] 
-#     for subj_id in cfg_dataset['subj_ids'] 
-#     for file_id in cfg_dataset['file_ids']
-#     ]
 
 cfg_prune = {
     'snr_thresh' : 5, # the SNR (std/mean) of a channel. 
@@ -140,7 +134,6 @@ cfg_preprocess = {
     'cfg_GLM' : cfg_GLM 
 }
 
-
 cfg_mse_conc = {                
     'mse_val_for_bad_data' : 1e7 * units.micromolar**2, 
     'mse_amp_thresh' : 1.1e-6,
@@ -148,19 +141,18 @@ cfg_mse_conc = {
     'blockaverage_val' : 0 * units.micromolar
     }
 
-# if block averaging on OD:
 cfg_mse_od = {
     'mse_val_for_bad_data' : 1e1, 
-    'mse_amp_thresh' : 1.1e-6,
+    'mse_amp_thresh' : 1e-3,     #1.1e-6,
     'mse_min_thresh' : 1e-6,
     'blockaverage_val' : 0      # blockaverage val for bad data?
     }
 
 cfg_blockavg = {
-    'rec_str' :  'conc',  # 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
+    'rec_str' :  'od_corrected',  # 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
     'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
     'cfg_hrf' : cfg_hrf,
-    'trange_hrf_stat' : [10, 20],  
+    'trange_hrf_stat' :  [4, 7],  # [10, 20],   # [4,7] for BS
     'flag_save_block_avg_hrf': True,
     'flag_save_each_subj' : False,  # !!! do we need this?  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
@@ -191,19 +183,19 @@ importlib.reload(pfDAB)
 
 # File naming stuff
 p_save_str = ''
-if cfg_motion_correct['flag_do_imu_glm']:  # to identify if data is pruned or unpruned
+if cfg_motion_correct['flag_do_imu_glm']:  
     p_save_str =  p_save_str + '_imuGLM' 
 else:
     p_save_str =  p_save_str
-if cfg_motion_correct['flag_do_tddr']:  # to identify if data is pruned or unpruned
+if cfg_motion_correct['flag_do_tddr']: 
     p_save_str =  p_save_str + '_tddr' 
 else:
     p_save_str =  p_save_str 
-if cfg_preprocess['flag_do_GLM_filter']:  # to identify if data is pruned or unpruned
+if cfg_preprocess['flag_do_GLM_filter']:  
     p_save_str =  p_save_str + '_GLMfilt' 
 else:
     p_save_str =  p_save_str   
-if cfg_preprocess['flag_prune_channels']:  # to identify if data is pruned or unpruned
+if cfg_preprocess['flag_prune_channels']:  
     p_save_str =  p_save_str + '_pruned' 
 else:
     p_save_str =  p_save_str + '_unpruned' 
