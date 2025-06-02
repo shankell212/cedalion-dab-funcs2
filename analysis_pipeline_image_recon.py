@@ -84,7 +84,7 @@ cfg_img_recon = {
     'flag_save_img_results' : True
     }
 
-mse_min_thresh = 1e-3  # change to -5 or -6
+mse_min_thresh = 1e-6
 
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives',  cfg_dataset['derivatives_subfolder'], 'processed_data')
 
@@ -236,31 +236,29 @@ for trial_type in ind_subj_blockavg.trial_type:
 
     # get the average
     X_hrf_mag_mean = all_subj_X_hrf_mag.mean('subj')
+    
     X_hrf_mag_mean_weighted = X_hrf_mag_weighted / X_mse_inv_weighted
     
     X_mse_mean_within_subject = 1 / X_mse_inv_weighted
     X_mse_mean_within_subject = X_mse_mean_within_subject.assign_coords({'trial_type': trial_type})
-    
-    X_mse_subj_tmp = all_subj_X_mse # PLOT THIS
-    
-    # temp = all_subj_X_mse.copy()
-    # temp[: ~M] = np.nan
-    # temp = np.log10(temp.sel(vertex=all_subj_X_mse.is_brain.values).stack(val=('vertex', 'chromo', 'subj')))
-    # temp[np.isneginf(temp)] = np.nan
-    
-    # plt.hist(temp, bins=100)
-    # plt.axvline(np.log10(mse_min_thresh), color='k')
-    
-    # X_mse_subj_tmp = xr.where(X_mse_subj_tmp < mse_min_thresh, mse_min_thresh, X_mse_subj_tmp)
-    X_mse_weighted_between_subjects_tmp = (all_subj_X_hrf_mag - X_hrf_mag_mean)**2 / X_mse_subj_tmp # X_mse_subj_tmp is weights for each sub
-    X_mse_weighted_between_subjects = X_mse_weighted_between_subjects_tmp.mean('subj')
-    X_mse_weighted_between_subjects = X_mse_weighted_between_subjects * X_mse_mean_within_subject # / (all_subj_X_mse**-1).mean('subj')
+        
+    X_mse_weighted_between_subjects_tmp = (all_subj_X_hrf_mag - X_hrf_mag_mean_weighted)**2  
+    X_mse_weighted_between_subjects = X_mse_weighted_between_subjects_tmp / all_subj_X_mse  
+    X_mse_weighted_between_subjects = X_mse_weighted_between_subjects.mean('subj') * X_mse_mean_within_subject # normalized by the within subject variances as weights
+ 
     X_mse_weighted_between_subjects = X_mse_weighted_between_subjects.pint.dequantify()
+ 
+    X_mse_btw_within_sum_subj = all_subj_X_mse + X_mse_weighted_between_subjects
+    denom = (1/X_mse_btw_within_sum_subj).sum('subj')
     
-    X_stderr_weighted = np.sqrt( X_mse_mean_within_subject + X_mse_weighted_between_subjects ) # total covariance (MSE)
+    X_hrf_mag_mean_weighted = (X_hrf_mag_mean / X_mse_btw_within_sum_subj).sum('subj')
+    X_hrf_mag_mean_weighted = X_hrf_mag_mean_weighted / denom
     
+    mse_total = 1/denom
+
+    X_stderr_weighted = np.sqrt( mse_total )
     X_tstat = X_hrf_mag_mean_weighted / X_stderr_weighted
-    
+   
     if all_trial_X_hrf_mag is None:
         
         all_trial_X_hrf_mag = X_hrf_mag_mean
