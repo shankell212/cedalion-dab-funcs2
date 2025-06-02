@@ -2,12 +2,15 @@
 ##############################################################################
 #%matplotlib widget
 
+
+
 import os
 import cedalion
 import cedalion.nirs
 import cedalion.sigproc.quality as quality
-
+import cedalion.xrutils as xrutils
 from cedalion.sigdecomp.ERBM import ERBM
+import cedalion.models.glm as glm
 
 import xarray as xr
 import matplotlib.pyplot as p
@@ -19,48 +22,51 @@ from math import ceil
 
 import gzip
 import pickle
+import json
 
 
 # import my own functions from a different directory
 import sys
 sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs/modules')
-#sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\cedalion-dab-funcs2')
-#sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2')
+#sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
 import module_load_and_preprocess as pfDAB
 import module_plot_DQR as pfDAB_dqr
-import module_group_avg as pfDAB_grp_avg
+import module_group_avg as pfDAB_grp_avg    
 import module_ERBM_ICA as pfDAB_ERBM
 import module_image_recon as pfDAB_img
 import module_spatial_basis_funs_ced as sbf 
 
 
-# Turn off all warnings
-import warnings
-warnings.filterwarnings('ignore')
 
 
 # %% 
 ##############################################################################
 import importlib
-importlib.reload(pfDAB_dqr)
 importlib.reload(pfDAB)
-importlib.reload(pfDAB_grp_avg)
+
+
 
 
 # %% Initial root directory and analysis parameters
 ##############################################################################
 
-flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
-rootDir_saveData = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/gradCPT_NN24_pilot/derivatives/processed_data/'
-flag_save_preprocessed_data = False
-
+cfg_hrf = {
+    'stim_lst' : ['mnt'], 
+    't_pre' : 5 *units.s, 
+    't_post' : 33 *units.s
+    #'t_post' : [ 33, 33 ] *units.s   # !!! GLM does not let you have different time ranges for diff stims right now
+    }
 
 cfg_dataset = {
-    'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/gradCPT_NN24_pilot/',
-    'subj_ids' : ['250313'], #'01','02','03','04','05','06','07','08'],
-    'file_ids' : ['gradCPT_run-01','gradCPT_run-02'],#'WM_run-01','WM_run-02','WM_run-03','WM_run-04'],
+    'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/gradCPT_NN24/',
+    'subj_ids' : ['629', '634', '636'],
+    'file_ids' : ['gradCPT_run-01','gradCPT_run-02', 'gradCPT_run-03'],#'WM_run-01','WM_run-02','WM_run-03','WM_run-04'],
+    # 'root_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BS_Laura_Miray_2025/',
+    # 'subj_ids' : ['586','587','592','613','621'],#['547','568','577','580','581','583','586','587','588','592','613','618','619','621','633'], 
+    # 'file_ids' : ['BS_run-01', 'BS_run-02', 'BS_run-03'],
     'subj_id_exclude' : [], #['05','07'] # if you want to exclude a subject from the group average
-    #'stim_lst' : ['ST', 'DT']  # FIXME: use this instead of having separate stim lists for hrf, dqr, ica, etc ???? - SK
+    'cfg_hrf' : cfg_hrf,
+    'derivatives_subfolder' : ''    
 }
 
 # Add 'filenm_lst' separately after cfg_dataset is initialized
@@ -70,13 +76,11 @@ cfg_dataset['filenm_lst'] = [
     for file_id in cfg_dataset['file_ids']
     ]
 
-cfg_dqr = {
-    'stim_lst_dqr' : ['passive', 'active'] # FIXME: why have multiple of this
-}
+
 
 cfg_prune = {
     'snr_thresh' : 5, # the SNR (std/mean) of a channel. 
-    'sd_threshs' : [1, 60]*units.mm, # defines the lower and upper bounds for the source-detector separation that we would like to keep
+    'sd_threshs' : [1, 38]*units.mm, # defines the lower and upper bounds for the source-detector separation that we would like to keep
     'amp_threshs' : [1e-5, 0.84], # define whether a channel's amplitude is within a certain range
     'perc_time_clean_thresh' : 0.6,
     'sci_threshold' : 0.6,
@@ -86,41 +90,44 @@ cfg_prune = {
     'flag_use_psp' : False
 }
 
-cfg_imu_glm = {'statesPerDataFrame' : 89,
+cfg_imu_glm = {'statesPerDataFrame' : 89,   # FOR WALKING DATA
 		'hWin' : np.arange(-3,5,1), # window for impulse response function 
 		'statesPerDataFrame' : 89,
-		'n_components' : [3, 2],  # [gyro, accel]       # --- note: this will change fig sizes
+		'n_components' : [3, 2],  # [gyro, accel]       # !!! note: changing this will change fig sizes - add that in?
         'butter_order' : 4,   # butterworth filter order
         'Fc' : 0.1,   # cutoff freq (Hz)
-        'plot_flag_imu' : True
+        'plot_flag_imu' : True  
 }
 
 cfg_motion_correct = {
-    'flag_do_splineSG' : False, # if True, will do splineSG motion correction
-    'splineSG_p' : 0.99, # FIXME: pass the splineSG params as cfg_splineSG
-    'splineSG_frame_size' : 10 * units.s,
-    'flag_do_tddr' : True,
+    #'flag_do_splineSG' : False, # !!! This is not doing anything. left out for now. if True, will do splineSG motion correction
+    #'splineSG_p' : 0.99, 
+    #'splineSG_frame_size' : 10 * units.s,
+    'flag_do_tddr' : True,  
     'flag_do_imu_glm' : False,
     'cfg_imu_glm' : cfg_imu_glm,
 }
 
 cfg_bandpass = { 
-    'fmin' : 0.02 * units.Hz,
-    'fmax' : 3 * units.Hz
+    'fmin' : 0.01 * units.Hz, #0.02 * units.Hz,
+    'fmax' : 1 * units.Hz,  #3 * units.Hz
+    'flag_bandpass_filter' : True
 }
+
 
 cfg_GLM = {
     'drift_order' : 1,
-    'distance_threshold' : 20*units.mm, # for ssr
+    'distance_threshold' : 20 *units.mm, # for ssr
     'short_channel_method' : 'mean',
-    'noise_model' : "ols",
-    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
-    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
-    't_pre' : 5*units.s, 
-    't_post' : 33*units.s   # !!! make same as blockaverage???
-    }
+    'noise_model' : "ols",    # !!! add choice of basis func 
+    't_delta' : 1 *units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
+    't_std' : 1 *units.s ,     #  the temporal spacing between consecutive gaussians
+    'cfg_hrf' : cfg_hrf
+    }           
+
 
 cfg_preprocess = {
+    'flag_prune_channels' : False,  # FALSE = does not prune chans and does weighted averaging, TRUE = prunes channels and no weighted averaging
     'median_filt' : 3, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
@@ -129,10 +136,11 @@ cfg_preprocess = {
     'cfg_GLM' : cfg_GLM 
 }
 
-cfg_mse_conc = {
+
+cfg_mse_conc = {                
     'mse_val_for_bad_data' : 1e7 * units.micromolar**2, 
     'mse_amp_thresh' : 1.1e-6,
-    'mse_min_thresh' : 1e0 * units.micromolar**2,
+    'mse_min_thresh' : 1e0 * units.micromolar**2, 
     'blockaverage_val' : 0 * units.micromolar
     }
 
@@ -140,42 +148,36 @@ cfg_mse_conc = {
 cfg_mse_od = {
     'mse_val_for_bad_data' : 1e1, 
     'mse_amp_thresh' : 1.1e-6,
-    'mse_min_thresh' : 1e-6,
-    'blockaverage_val' : 0 
+    'mse_min_thresh' : 1e-6,  # LC using 1e-3 ?
+    'blockaverage_val' : 0      # blockaverage val for bad data?
     }
-
-
-cfg_GLM = {
-    'drift_order' : 1,
-    'distance_threshold' : 20*units.mm, # for ssr
-    'short_channel_method' : 'mean',
-    'noise_model' : "ols",
-    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
-    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
-    }
-
 
 cfg_blockavg = {
-    'trange_hrf' : [5, 35] * units.s,
-    'trange_hrf_stat' : [10, 20],
-    'stim_lst_hrf' : ['passive', 'active'], # FIXME: why have multiple of this
-    'flag_do_GLM_filter' : True,
-    'cfg_GLM' : cfg_GLM,
+    'rec_str' : 'conc',   # what you want to block average (will be either 'od_corrected' or 'conc')
+    'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
+    'cfg_prune' : cfg_prune,
+    'cfg_hrf' : cfg_hrf,
+    'trange_hrf_stat' : [4, 7],  
     'flag_save_group_avg_hrf': True,
     'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
-    }               # !!! provide list of rec str and whether or not to save weighted for each one
+    }               
+
 
 
 cfg_erbmICA = {}
 
-save_path = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
+save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
+
+flag_load_preprocessed_data = True  
+flag_save_preprocessed_data = False   # SAVE or no save
+
+flag_load_blockaveraged_data = False
 
 
 # %% Load and preprocess the data
 ##############################################################################
-
 
 # determine the number of subjects and files. Often used in loops.
 n_subjects = len(cfg_dataset['subj_ids'])
@@ -195,106 +197,234 @@ for subj_id in cfg_dataset['subj_ids']:
         else:
             cfg_dataset['filenm_lst'][subj_idx].append( filenm )
 
-
 import importlib
 importlib.reload(pfDAB)
 
+
+# File naming stuff
+p_save_str = ''
+if cfg_motion_correct['flag_do_imu_glm']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_imuGLM' 
+else:
+    p_save_str =  p_save_str
+if cfg_motion_correct['flag_do_tddr']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_tddr' 
+else:
+    p_save_str =  p_save_str 
+if cfg_preprocess['flag_do_GLM_filter']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_GLMfilt' 
+else:
+    p_save_str =  p_save_str   
+if cfg_preprocess['flag_prune_channels']:  # to identify if data is pruned or unpruned
+    p_save_str =  p_save_str + '_pruned' 
+else:
+    p_save_str =  p_save_str + '_unpruned' 
+    
+    
 # RUN PREPROCESSING
 if not flag_load_preprocessed_data:
     print("Running load and process function")
-    rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr )
     
+    # RUN preprocessing
+    rec, chs_pruned_subjs = pfDAB.load_and_preprocess( cfg_dataset, cfg_preprocess ) 
+
     
     # SAVE preprocessed data 
     if flag_save_preprocessed_data:
-    
+        print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                     'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
+                                     'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
             pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
             
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                     'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'wb') as f:
-            pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
+                                     'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'wb') as f:
+            pickle.dump({'rec': rec, 'cfg_dataset': cfg_dataset}, f, protocol=pickle.HIGHEST_PROTOCOL )
             
             
-        # SAVE cfg params to txt file
-        dict_cfg_save = {"cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
-        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + '.txt'
-
-        with open(rootDir_saveData + cfg_save_str, "w", encoding="utf-8") as f:
-                def write_dict(d, level=0):
-                    for key, value in d.items():
-                        f.write("  " * level + f"{key}: ")
-                        if isinstance(value, dict):  # If the value is a sub-dictionary, recurse
-                            f.write("\n")
-                            write_dict(value, level + 1)
-                        else:
-                            f.write(f"{value}\n")
-                            
-                for var_name, dict_data in dict_cfg_save.items():
-                        f.write(f"=== {var_name} ===\n")  # Writing the dictionary name
-                        if isinstance(dict_data, dict):
-                            write_dict(dict_data)
-                        else:
-                            f.write(str(dict_data) + "\n")  # If it's not a dict, just write its value
-                        f.write("\n")  # Separate different dictionaries
+        # SAVE cfg params to json file
+        # !!! ADD image recon cfg  ?? - or make it its own .json since i am planning to separate into 2 scripts
+        dict_cfg_save = {"cfg_hrf": cfg_hrf, "cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+        
+        cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.json'
+            
+        with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
+            json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
+        print("Preprocessed data successfully saved.")
         
         
-# LOAD in saved data
+# LOAD IN SAVED DATA
 else:
-    print("Loading saved data")
-    with gzip.open( os.path.join(rootDir_saveData, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
+    print("Loading saved data")   # !!! update with new naming for pruned or unpruned above
+    with gzip.open( os.path.join(save_path, 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f: # !!! FIX ME: this assumes file_ids only includes ONE task
          rec = pickle.load(f)
-    with gzip.open( os.path.join(rootDir_saveData, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f:
+    with gzip.open( os.path.join(save_path, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + p_save_str + '.pkl'), 'rb') as f:
          chs_pruned_subjs = pickle.load(f)
+    print(f'Data loaded successfully for {cfg_dataset["file_ids"][0].split("_")[0]}')
 
-# %% Save one rec file for visualization with vis_time_series.py
+
+
+
+
+
+
+# # %%
+# # problem with onset time of gradCPT
+##############################################################################
+
+# for idx_subj in range(len(cfg_dataset['subj_ids'])):
+#     for idx_file in range(len(cfg_dataset['file_ids'])):
+#         print(f"{idx_subj},{idx_file}  {rec[idx_subj][idx_file]['amp'].time.values[-1]:.2f},{rec[idx_subj][idx_file].stim.onset.values[-1]}")
+
+# # %%
+# # plot rec[0][0].aux_ts['digital']
+
+# idx_subj = 0
+# idx_file = 0
+
+# rec[idx_subj][idx_file].aux_ts['digital'].plot()
+
+# idx = np.where(rec[idx_subj][idx_file].aux_ts['digital'].values > 1)[0][0] # find where the digital signal is 1
+# print(rec[idx_subj][idx_file].aux_ts['digital'].time[idx].values)
+# print(rec[idx_subj][idx_file].stim.onset.values[0]) # find the first stimulus onset time
+
+# %%
+# GLM
+idx_subj = 0
+idx_file = 0
+
+stim = rec[idx_subj][idx_file].stim.copy()
+
+#stim = stim.loc[stim['trial_type'] == 'mnt']
 
 idx_subj = 0
 idx_file = 0
 
-with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
-                                'rec_ts_sub' + cfg_dataset["subj_ids"][idx_subj] + cfg_dataset["file_ids"][idx_file] + '.pkl'), 'wb') as f:
-    pickle.dump(rec[idx_subj][idx_file], f, protocol=pickle.HIGHEST_PROTOCOL )
+# ts_long, ts_short = cedalion.nirs.split_long_short_channels(
+#     rec[idx_subj][idx_file]["conc"], rec[idx_subj][idx_file].geo3d, distance_threshold=15 * units.mm
+# )
+
+dms = glm.design_matrix.hrf_regressors(
+        rec[idx_subj][idx_file]['conc'], stim, glm.Gamma(
+            tau={"HbO": 0 * units.s, "HbR": 1 * units.s}, sigma={"HbO": 3 * units.s, "HbR": 3 * units.s}, T=0 * units.s
+            )
+    )
+
+# %%
+# get the design matrix for VTC
+
+#import numpy as np
+from scipy.signal import filtfilt, windows
+
+t_vtc = stim.onset.values
+vtc = stim.VTC.values
+
+# smooth vtc
+# Create the Gaussian window
+L = 20
+W = windows.gaussian(M=L, std=4) / 2  # std=7 approximates MATLAB's gausswin(L)
+W = W / np.sum(W)  # normalize so sum(W) = 1
+# Apply zero-phase filtering
+vtc = filtfilt(W, [1.0], vtc)
+
+# interpolate the VTC to the time of the ts
+vtc_interp = np.interp(rec[idx_subj][idx_file]['conc'].time.values, t_vtc, vtc)
+
+vtc_interp_xr = xr.DataArray(
+    vtc_interp,
+    coords=[rec[idx_subj][idx_file]['conc'].time],
+    dims=['time']
+)
+
+# expand dimensions to match the design matrix
+vtc_interp_xr = vtc_interp_xr.expand_dims( regressor=['VTC'], chromo=['HbO', 'HbR'] )
+vtc_interp_xr = vtc_interp_xr.transpose('time', 'regressor', 'chromo' )
+
+vtc_xr = xr.DataArray(
+    vtc,
+    coords={
+        'time': t_vtc },
+    dims=['time']
+)
+vtc_xr = vtc_xr.expand_dims( regressor=['VTC'], chromo=['HbO', 'HbR'] )
+vtc_xr = vtc_xr.transpose('time', 'regressor', 'chromo' )
+
+
+from cedalion.models.glm.design_matrix import DesignMatrix
+
+dms_vtc = DesignMatrix(
+            common=vtc_interp_xr,
+            channel_wise=[]
+        )
+
+# %%
+# display design matrix
+f,ax = p.subplots(1,1,figsize=(12,5))
+foo = vtc_interp_xr.sel(chromo="HbO")#, time=slice(0, 170))
+ax.plot(foo.time,foo.values)
+# foo = vtc_xr.sel(chromo="HbO", time=slice(0, 170))
+# ax.plot(foo.time, foo.values, marker='x')
+p.show
 
 
 
-# %% ERBM ICA Filtering 
-##############################################################################
-import importlib
-importlib.reload(pfDAB_ERBM)
+# %%
+# fit the model
+results = glm.fit(rec[idx_subj][idx_file]['conc'], dms_vtc, noise_model="ols", max_jobs=1) # ols, ar_irls
 
-# used for helping determine which ICA components to keep and remove
-trange_hrf = [5, 35] * units.s # time range for block averaging
-trange_hrf_stat = [5, 20] # time range for t-stat
-stim_lst_hrf_ica = ['STS'] # which trial_types to consider for which ICA components to keep
+display(results)
 
-ica_spatial_mask_thresh = 1.0 # for selecting "etCO2" components to remove
-ica_tstat_thresh = 1.0 # for selecting significant components to keep
+betas = results.sm.params
+betas
 
-pca_var_thresh = 0.99 # keep enough PCs to explain this fraction of the variance
-p_ica = 27 # not sure what this does
+betas.rename("betas").to_dataframe()
 
-ica_lpf = 1.0 * units.Hz # low pass filter the data before ICA
-ica_downsample = 1  # downsample the data by this factor before running ICA. ICA cost is linear with number of samples.
-                    # and since we low pass filtered the data before ICA, we can downsample it to save time.
-                    # Note that the NN22 sample rate is often ~9 Hz, and will be reduced by this factor.
+# %%
 
-cov_amp_thresh = 1.1e-6 # threshold for the amplitude of the channels below which we assign a high variance
-                        # for ninjaNIRS, negative amp's are set to 1e-6. Sometimes spikes bring the mean slightly above 1e-6
+# check if any of the values are NaN along the time dimension of rec[idx_subj][idx_file]['conc']
+foo1 = rec[idx_subj][idx_file]['conc'].copy()
 
+foo = rec[idx_subj][idx_file]['conc'].mean('time').values
+foo = np.isnan(foo)
 
-flag_do_pca_filter = True
-flag_calculate_ICA_matrix = False
-flag_do_ica_filter = True
+# replace NaN values in foo1 with 0
+# foo1.values[np.isnan(foo)] = 0
+# foo1.values[np.isinf(foo)] = 0
+# foo1.values[np.isneginf(foo)] = 0
 
-flag_ICA_use_pruned_data = False # if True, use the pruned data for ICA, otherwise use the original data
-                                 # if False, then we need to correct the variances of the pruned channels for the ts_zscore
-flag_ERBM_vs_EBM = False # if True, use ERBM, otherwise use EBM
+foo1 = foo1.where( ~foo1.isnull(), 0)
+
+results = glm.fit(foo1, dms, noise_model="ar_irls", max_jobs=1) # ols, ar_irls
 
 
-# FIXME: I want to verify that this properly scales back the NOT pruned data to channel space
-rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_do_pca_filter, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica )
+# %%
+# scalp plots
+importlib.reload(plots)
+
+
+f, ax = p.subplots(2, 2, figsize=(16, 16))
+vlims = {"HbO" : [0.,0.03], "HbR" : [-0.1, 0.05]}
+vminmax = 10
+for i_chr, chromo in enumerate(betas.chromo.values):
+    vmin, vmax = vlims[chromo]
+    for i_reg, reg in enumerate(["VTC"]):
+        # vminmax = np.max(np.abs(betas.sel(chromo=chromo, regressor=reg)))
+        vmin = -vminmax
+        vmax = vminmax
+        cedalion.plots.scalp_plot(
+            rec[idx_subj][idx_file]["amp"],
+            rec[idx_subj][idx_file].geo3d,
+            betas.sel(chromo=chromo, regressor=reg),
+            ax[i_chr][i_reg],
+            min_dist=1.5 * cedalion.units.cm,
+            max_dist=3.5 * cedalion.units.cm,
+            title=f"{chromo} {reg}",
+            vmin=vmin,
+            vmax=vmax,
+            optode_labels=True,
+            cmap="jet",
+            cb_label=r"$\beta$"
+        )
+p.tight_layout()
 
 
 
@@ -303,46 +433,65 @@ rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lp
 
 # %% Block Average - unweighted and weighted
 ##############################################################################
-
+cfg_blockavg = {
+    'rec_str' : 'conc',   # what you want to block average (will be either 'od_corrected' or 'conc')
+    'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
+    'cfg_prune' : cfg_prune,
+    'cfg_hrf' : cfg_hrf,
+    'trange_hrf_stat' : [4, 7],  
+    'flag_save_group_avg_hrf': True,
+    'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
+    'cfg_mse_conc' : cfg_mse_conc,
+    'cfg_mse_od' : cfg_mse_od
+    }               
 
 import importlib
 importlib.reload(pfDAB_grp_avg)
 
-flag_load_blockaveraged_data = False
+#flag_load_blockaveraged_data = False
 
-#rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
-rec_str_lst = ['od_tddr', 'od_o_tddr']
-#rec_str_lst = ['conc_tddr', 'conc_o_tddr']
-#rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
-
-rec_str_lst_use_weighted = [False, True]  #, False, True] 
-# !!!  ^^^use for  image recon -> if Cmeas false or true
 
 # for saving file name 
-if 'conc' in rec_str_lst[0]:  
-    save_str = 'CONC'
+    
+if 'conc' in cfg_blockavg['rec_str']:  
+    save_str = p_save_str + '_CONC' 
 else:
-    save_str = 'OD'
+    save_str = p_save_str + '_OD' 
+    
+# FIXME: use cfg_GLM? Or is that for the GLM filter and not the HRF estimation? Can probably use it for both
+_, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_glm( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+
+#_, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+
+
+# %%
+
+# find channels that are NaN in blockaverage_mean
+idxO = np.where(np.isnan(blockaverage_mean.sel(trial_type='right',chromo='HbO').values))[0]
+idxR = np.where(np.isnan(blockaverage_mean.sel(trial_type='right',chromo='HbR').values))[0]
+
+
+
+
+
+
+
+
+# %%
 
 # Compute block average
-if not flag_load_blockaveraged_data:
-    # !!! ADD in function if rec_str_use_weighted_lst is NONE then assume to save weighted for all trial types and for new_lst_use_weighted return NONE
-    # !!! ^^ OR ASSUME SAVE UNWEIGHTED???
-    blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.get_group_avg_for_diff_conds(rec, 
-                                                                                                                                 rec_str_lst, rec_str_lst_use_weighted,  chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # save the results to a pickle file
-    blockaverage = blockaverage_mean
-
-    # Compute new rec_str_lst_use_weighted
-    new_rec_str_lst_use_weighted = []
-    [new_rec_str_lst_use_weighted .extend([value] * len(cfg_blockavg['stim_lst_hrf'])) for value in rec_str_lst_use_weighted] # Repeat each value for each trial type
-
+if not flag_load_blockaveraged_data:  
+    
+    if cfg_preprocess['flag_prune_channels']:   # if using pruned data, don't save weighted
+        blockaverage_mean, _, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    
+    else:    # if not pruning, save weighted blockaverage data
+        _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     
     groupavg_results = {'blockaverage': blockaverage_mean,
                'blockaverage_stderr': blockaverage_stderr,
                'blockaverage_subj': blockaverage_subj,
                'blockaverage_mse_subj': blockaverage_mse_subj,
-               'new_rec_str_lst_use_weighted' : new_rec_str_lst_use_weighted,
                'geo2d' : rec[0][0].geo2d,
                'geo3d' : rec[0][0].geo3d
                }
@@ -361,11 +510,10 @@ else: # LOAD data
     if os.path.exists(filepath_bl):
         with gzip.open(filepath_bl, 'rb') as f:
             groupavg_results = pickle.load(f)
-        blockaverage = groupavg_results['blockaverage']
+        blockaverage_mean = groupavg_results['blockaverage']
         blockaverage_stderr = groupavg_results['blockaverage_stderr']
         blockaverage_subj = groupavg_results['blockaverage_subj']
         blockaverage_mse_subj = groupavg_results['blockaverage_mse_subj']
-        new_rec_str_lst_use_weighted = groupavg_results['new_rec_str_lst_use_weighted']
         geo2d = groupavg_results['geo2d']
         geo2d = groupavg_results['geo3d']
         print("Blockaverage file loaded successfully!")
@@ -373,7 +521,22 @@ else: # LOAD data
     else:
         print(f"Error: File '{filepath_bl}' not found!")
         
-blockaverage_all = blockaverage.copy()
+blockaverage_all = blockaverage_mean.copy()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
