@@ -399,8 +399,15 @@ def get_image_noise(C_meas, X, W, SB=False, DIRECT=True, G=None):
 
         cov_img_diag = einv.values**2 @ cov_img_diag
 
-        
-    noise = X.copy()
+    if not hasattr(X, 'time') and not hasattr(X, 'reltime'):    
+        noise = X.copy()
+    else:
+        if hasattr(X, 'time'):
+            noise = X.isel(time=0, drop=True)
+        elif hasattr(X, 'reltime'):
+            noise = X.isel(reltime=0, drop=True)
+        else:
+            raise ValueError("X must have either 'time' or 'reltime' dimension")
     noise.values = cov_img_diag
 
     return noise
