@@ -13,6 +13,8 @@ import numpy as np
 from scipy.cluster.hierarchy import linkage
 from scipy.spatial.distance import squareform
 
+import module_image_recon as img_recon 
+import module_spatial_basis_funs_ced as sbf 
 
 
 
@@ -211,10 +213,17 @@ def corr_cluster( corr_matrix_xr, cluster_threshold ):
 
 def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique_trial_types, 
                        Adot_parcels_lev1_xr, Adot_parcels_lev2_xr,
-                       flag_do_bp_filter_on_od = True, flag_do_AR_filter_on_conc = True, flag_do_gms_chromo = True, flag_channels_to_parcels = False, flag_parcels_use_lev1 = False ):
+                       cfg_img_recon = None, head = None, Adot = None,
+                       flag_do_image_recon = False, flag_do_bp_filter_on_conc = True, flag_do_AR_filter_on_conc = 0, 
+                       flag_do_gms_chromo = True, flag_channels_to_parcels = False, flag_parcels_use_lev1 = False ):
+    import statsmodels.api as sm
+    from statsmodels.tsa.stattools import arma_order_select_ic
 
-    n_subjects = len(cfg_dataset['subj_ids'])
     n_files = len(cfg_dataset['file_ids'])
+
+    F = None # initializing F, D, G for image reconstruction
+    D = None
+    G = None
 
     # Loop over subjects
     for idx_subj, curr_subj in enumerate(cfg_dataset['subj_ids']):
@@ -234,54 +243,26 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
         conc_ts_subjs[idx_subj] = {}
         conc_var_subjs[idx_subj] = {}
 
-        corr_hbo_files = {}
-        corr_hbr_files = {}
+        # corr_hbo_files = {}
+        # corr_hbr_files = {}
 
         # Loop over runs
         for idx_file, curr_file in enumerate(cfg_dataset['file_ids']):
 
-            # if idx_file >0:
-            #     break
-
             # get the OD time series
             od_ts = rec[idx_subj][idx_file]['od_corrected'].copy()
 
-            # bandpass filter the parcel time series
-            if flag_do_bp_filter_on_od:
-                fmin = 0.01 * units.Hz
-                fmax = 0.2 * units.Hz
-                od_ts = cedalion.sigproc.frequency.freq_filter(od_ts, fmin, fmax)
+            # convert to conc in channel space or image space
+            if not flag_do_image_recon:
+                dpf = xr.DataArray(
+                    [1, 1],
+                    dims="wavelength",
+                    coords={"wavelength": od_ts.wavelength},
+                )
+                conc_ts = cedalion.nirs.od2conc(od_ts, rec[idx_subj][idx_file].geo3d, dpf, spectrum="prahl")
 
-            # convert to conc
-            dpf = xr.DataArray(
-                [1, 1],
-                dims="wavelength",
-                coords={"wavelength": od_ts.wavelength},
-            )
-            conc_ts = cedalion.nirs.od2conc(od_ts, rec[idx_subj][idx_file].geo3d, dpf, spectrum="prahl")
-
-            # Do the AR filtering
-            if flag_do_AR_filter_on_conc:
-                ar_order = 7
-                conc_ts_tmp = conc_ts.isel(time=slice(ar_order, None)).copy()  # remove the first ar_order points
-                for idx_chromo, chromo in enumerate(conc_ts.chromo):
-                    for idx_ch, ch in enumerate(conc_ts.channel):
-                        y = conc_ts.sel(chromo=chromo, channel=ch).values
-
-                        # Fit AR model if y has no NaNs or Infs
-                        if np.all(np.isfinite(y)):
-                            model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
-                            result = model.fit()
-                            residuals = result.resid * units.micromolar  # convert back to micromolar
-
-                            # Store the residuals back into the time series
-                            conc_ts_tmp.loc[dict(chromo=chromo, channel=ch)] = xr.DataArray(residuals, dims='time', coords={'time': conc_ts_tmp.time})
-                conc_ts = conc_ts_tmp.copy()
-
-            # Global mean subtraction for each chromo
-            if flag_do_gms_chromo:
-                # do a weighted mean by variance
-                conc_var = conc_ts.var('time')
+                # get the variance 
+                conc_var = conc_ts.var('time') + cfg_blockavg['cfg_mse_conc']['mse_min_thresh'] # set a small value to avoid dominance for low variance channels
 
                 # correct for bad data
                 amp = rec[idx_subj][idx_file]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
@@ -293,16 +274,144 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
                 conc_var.loc[dict(channel=conc_ts.isel(channel=idx_sat).channel.data)] = cfg_blockavg['cfg_mse_conc']['mse_val_for_bad_data']
                 conc_ts.loc[dict(channel=conc_ts.isel(channel=idx_sat).channel.data)] = cfg_blockavg['cfg_mse_conc']['blockaverage_val']
 
-                # FIXME: deal with rare instances when conc_var is 0
+            else:
+                C_meas = od_ts.var('time') + cfg_blockavg['cfg_mse_od']['mse_min_thresh'] # set a small value to avoid dominance for low variance channels
+                # correct for bad data
+                amp = rec[idx_subj][idx_file]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
+                idx_amp = np.where(amp < cfg_blockavg['cfg_mse_od']['mse_amp_thresh'])[0]
+                C_meas.loc[dict(channel=amp.isel(channel=idx_amp).channel.data)] = cfg_blockavg['cfg_mse_conc']['mse_val_for_bad_data']
+                od_ts.loc[dict(channel=amp.isel(channel=idx_amp).channel.data)] = cfg_blockavg['cfg_mse_conc']['blockaverage_val']
 
+                idx_sat = np.where(chs_pruned_subjs[idx_subj][idx_file] == 0.0)[0] 
+                C_meas.loc[dict(channel=amp.isel(channel=idx_sat).channel.data)] = cfg_blockavg['cfg_mse_conc']['mse_val_for_bad_data']
+                od_ts.loc[dict(channel=amp.isel(channel=idx_sat).channel.data)] = cfg_blockavg['cfg_mse_conc']['blockaverage_val']
+
+                # for od_ts stack the wavelength and channel dimension to measurement dimension
+                od_ts_stacked = od_ts.stack(measurement=("wavelength", "channel")).reset_index("measurement")
+                od_ts_stacked = od_ts_stacked.transpose("measurement", "time")  # transpose to have measurement as the first dimension
+                
+                X_ts, W, D, F, G = img_recon.do_image_recon(od_ts_stacked, head = head, Adot = Adot, C_meas_flag = cfg_img_recon['flag_Cmeas'], C_meas = C_meas, 
+                                            wavelength = [760,850], BRAIN_ONLY = cfg_img_recon['BRAIN_ONLY'], DIRECT = cfg_img_recon['DIRECT'], SB = cfg_img_recon['SB'], 
+                                            cfg_sbf = cfg_img_recon['cfg_sb'], alpha_spatial = cfg_img_recon['alpha_spatial'], alpha_meas = cfg_img_recon['alpha_meas'],
+                                            F = F, D = D, G = G)
+                conc_ts = X_ts.transpose('chromo', 'vertex', 'time')
+                conc_ts = conc_ts.assign_coords(samples=("time", np.arange(conc_ts.shape[2])))
+                conc_ts = conc_ts.assign_coords(time=od_ts.time) # need to get the seconds attribute back
+
+                # get conc_var from the image reconstruction
+                conc_var = img_recon.get_image_noise(C_meas, X_ts, W, DIRECT = cfg_img_recon['DIRECT'], SB= cfg_img_recon['SB'], G=G)
+
+
+            # projecting vertices to parcels
+            # but only do this before BP, AR and GMS if also doing image recon
+            # otherwise projecting channels to parcels is done after GMS
+            if flag_do_image_recon and flag_channels_to_parcels: # project channels to parcel_lev2 by weighted average over channels
+                # weighted average with 1/var of each vertex as the weights
+                # conc_ts = conc_ts.groupby('parcel').mean('vertex') # this is not weighted average
+                w = 1 / conc_var
+                tsw = w * conc_ts
+                conc_ts = tsw.groupby('parcel').sum('vertex') / w.groupby('parcel').sum('vertex')
+                conc_var = 1 / w.groupby('parcel').sum('vertex')
+
+                # remove the 3 non-brain parcels
+                # FIXME can remove these 3 lines after testing
+                # conc_ts = conc_ts.sel(parcel=conc_ts.parcel != 'scalp')
+                # conc_ts = conc_ts.sel(parcel=conc_ts.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_LH')
+                # conc_ts = conc_ts.sel(parcel=conc_ts.parcel != 'Background+FreeSurfer_Defined_Medial_Wall_RH')
+                conc_ts = conc_ts.sel(parcel=~conc_ts.parcel.isin([
+                    'scalp',
+                    'Background+FreeSurfer_Defined_Medial_Wall_LH',
+                    'Background+FreeSurfer_Defined_Medial_Wall_RH'
+                ])) 
+                conc_var = conc_var.sel(parcel=~conc_var.parcel.isin([
+                    'scalp',
+                    'Background+FreeSurfer_Defined_Medial_Wall_LH',
+                    'Background+FreeSurfer_Defined_Medial_Wall_RH'
+                ])) 
+
+                # weighted average to level 1 or level 2 parcels                
+                if flag_parcels_use_lev1:
+                    parcel_list_lev = []
+                    for parcel in conc_ts.parcel.values:
+                        parcel_list_lev.append( parcel.split('_')[0] + '_' + parcel.split('_')[-1] )                
+                else:
+                    parcel_list_lev = []
+                    for parcel in conc_ts.parcel.values:
+                        if parcel.split('_')[1].isdigit():
+                            parcel_list_lev.append( parcel.split('_')[0] + '_' + parcel.split('_')[-1] )
+                        else:
+                            parcel_list_lev.append( parcel.split('_')[0] + '_' + parcel.split('_')[1] + '_' + parcel.split('_')[-1] )
+                conc_ts = conc_ts.assign_coords(parcel=("parcel", parcel_list_lev))
+                conc_var = conc_var.assign_coords(parcel=("parcel", parcel_list_lev))
+                w = 1 / conc_var
+                tsw = w * conc_ts
+                conc_ts = tsw.groupby('parcel').sum('parcel') / w.groupby('parcel').sum('parcel')
+                conc_var = 1 / w.groupby('parcel').sum('parcel')
+
+
+            # bandpass filter the time series
+            if flag_do_bp_filter_on_conc:
+                fmin = 0.01 * units.Hz
+                fmax = 0.2 * units.Hz
+                conc_ts = cedalion.sigproc.frequency.freq_filter(conc_ts, fmin, fmax)
+
+
+            # Do the AR filtering
+            # FIXME use from cedalion.math import ar_filter instead of the following code
+            #       But I notice that that function returns time x channel x chromo/wavelength
+            #       I am not thrilled about that. Also, it doesn't presently handle parcels or vertices
+            if flag_do_AR_filter_on_conc > 0:
+                ar_order = flag_do_AR_filter_on_conc
+                conc_ts_tmp = conc_ts.isel(time=slice(ar_order, None)).copy()  # remove the first ar_order points
+                for idx_chromo, chromo in enumerate(conc_ts.chromo):
+                    if hasattr(conc_ts, "channel"):
+                        for idx_ch, ch in enumerate(conc_ts.channel):
+                            y = conc_ts.sel(chromo=chromo, channel=ch).values
+                            # Fit AR model if y has no NaNs or Infs
+                            if np.all(np.isfinite(y)):
+                                model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
+                                result = model.fit()
+                                residuals = result.resid * units.micromolar  # convert back to micromolar
+                                # Store the residuals back into the time series
+                                conc_ts_tmp.loc[dict(chromo=chromo, channel=ch)] = xr.DataArray(residuals, dims='time', coords={'time': conc_ts_tmp.time})
+                    elif hasattr(conc_ts, "parcel"):
+                        for idx_parcel, parcel in enumerate(conc_ts.parcel):
+                            y = conc_ts.sel(chromo=chromo, parcel=parcel).values
+                            # Fit AR model if y has no NaNs or Infs
+                            if np.all(np.isfinite(y)):
+                                model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
+                                result = model.fit()
+                                residuals = result.resid * units.micromolar
+                                # Store the residuals back into the time series
+                                conc_ts_tmp.loc[dict(chromo=chromo, parcel=parcel)] = xr.DataArray(residuals, dims='time', coords={'time': conc_ts_tmp.time})
+                    elif hasattr(conc_ts, "vertex"):
+                        for idx_vertex, vertex in enumerate(conc_ts.vertex):
+                            y = conc_ts.sel(chromo=chromo, vertex=vertex).values
+                            # Fit AR model if y has no NaNs or Infs
+                            if np.all(np.isfinite(y)):
+                                model = sm.tsa.AutoReg(y, lags=ar_order, old_names=False)
+                                result = model.fit()
+                                residuals = result.resid * units.micromolar
+                                # Store the residuals back into the time series
+                                conc_ts_tmp.loc[dict(chromo=chromo, vertex=vertex)] = xr.DataArray(residuals, dims='time', coords={'time': conc_ts_tmp.time})
+                conc_ts = conc_ts_tmp.copy()
+
+
+            # Global mean subtraction for each chromo
+            if flag_do_gms_chromo:
+                # get the weighted mean by variance
                 gms = (conc_ts / conc_var).mean('channel') / (1/conc_var).mean('channel')
+
+                # fit GMS to the channel data and subtract it
                 numerator = (conc_ts * gms).sum(dim="time")
                 denominator = (gms * gms).sum(dim="time")
                 scl = numerator / denominator
                 conc_ts = conc_ts - scl*gms
 
+
             # project channels to parcels
-            if flag_channels_to_parcels: # project channels to parcel_lev2 by weighted average over channels
+            # we do this here for channel space data (i.e. no image recon)
+            if not flag_do_image_recon and flag_channels_to_parcels: # project channels to parcel_lev2 by weighted average over channels
                 w = 1 / conc_var
                 # get the normalized weighted averaging kernel
                 if flag_parcels_use_lev1:
@@ -320,15 +429,24 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
                 conc_var = xr.concat([foo_hbo, foo_hbr], dim='chromo')
 
                 n_ch_or_parcel = conc_ts.parcel.size
-            else:
+                correlation_coord = conc_ts.parcel.values
+            elif not flag_do_image_recon and not flag_channels_to_parcels:
                 n_ch_or_parcel = conc_ts.channel.size
+                correlation_coord = conc_ts.channel.values
+            elif flag_do_image_recon and flag_channels_to_parcels: 
+                n_ch_or_parcel = conc_ts.parcel.size
+                correlation_coord = conc_ts.parcel.values
+            elif flag_do_image_recon and not flag_channels_to_parcels:
+                n_ch_or_parcel = conc_ts.vertex.size
+                correlation_coord = conc_ts.vertex.values
+
 
             # loop over trial types
+            # get the time series for each trial type and the correlation matrix for repeatability
             for idx_trial_type, trial_type in enumerate(unique_trial_types):
                 if trial_type != 'full_ts':
                     idx = np.where(rec[idx_subj][idx_file].stim.trial_type==trial_type)[0]
                     t_indices_tmp = np.array([])
-                    dt = np.median(np.diff(conc_ts.time)) 
                     for ii in idx:
                         t_indices_tmp = np.concatenate( (t_indices_tmp, np.where( 
                                             (conc_ts.time >  rec[idx_subj][idx_file].stim.onset[ii]) &
@@ -350,22 +468,17 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
                 if idx_file == 0:
                     conc_ts_files[trial_type] = foo_ts
                     conc_var_files[trial_type] = conc_var.copy()
-                    # FIXME remove this next 4 lines once I am done testing
-                    # corr_hbo_files[trial_type] = np.zeros((len(cfg_dataset['file_ids']), len(conc_ts.parcel)**2))
-                    # corr_hbr_files[trial_type] = np.zeros((len(cfg_dataset['file_ids']), len(conc_ts.parcel)**2))
-                    # corr_hbo_files[trial_type][idx_file, :] = corr_hbo.reshape(-1)
-                    # corr_hbr_files[trial_type][idx_file, :] = corr_hbr.reshape(-1)
                 else:
                     conc_ts_files[trial_type] = xr.concat([conc_ts_files[trial_type], foo_ts], dim='time', coords='minimal', compat='override') # ensure no reordering since times overlap
                     conc_var_files[trial_type] = xr.concat([conc_var_files[trial_type], conc_var], dim='file')
-                    # remove these next two lines once I am done testing
-                    # corr_hbo_files[trial_type][idx_file, :] = corr_hbo.reshape(-1)
-                    # corr_hbr_files[trial_type][idx_file, :] = corr_hbr.reshape(-1)
                 
                 da_hbo = xr.DataArray(
                         corr_hbo.reshape(1,1,1,1,n_ch_or_parcel,n_ch_or_parcel),
                         dims=["subj","file", "trial_type", "chromo", "correlation_A", "correlation_B"],
-                        coords={"chromo": ["HbO"], "trial_type": [trial_type], "file": [idx_file], "subj": [curr_subj]}
+                        coords={"chromo": ["HbO"], "trial_type": [trial_type], 
+                            "file": [idx_file], "subj": [curr_subj], 
+                            "correlation_A": correlation_coord, 
+                            "correlation_B": correlation_coord}
                     )
                 da_hbr = xr.DataArray(
                         corr_hbr.reshape(1,1,1,1,n_ch_or_parcel,n_ch_or_parcel),
@@ -377,14 +490,12 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
                 else:
                     corr_trial_type_tmp = xr.concat([da_hbo, da_hbr], dim="chromo")
                     corr_trial_type = xr.concat([corr_trial_type, corr_trial_type_tmp], dim="trial_type")
-                
             # end of trial type loop
 
             if idx_file == 0:
                 corr_files = corr_trial_type.copy()
             else:
                 corr_files = xr.concat([corr_files, corr_trial_type], dim="file")
-
         # end of file loop
 
         # store the time series for each subject for each trial_type
@@ -396,24 +507,6 @@ def preprocess_dataset( rec, chs_pruned_subjs, cfg_dataset, cfg_blockavg, unique
             corr_subj_files = corr_files.copy()
         else:
             corr_subj_files = xr.concat([corr_subj_files, corr_files], dim="subj")
-
-            # I am now doing this above. This can be deleted.
-            # if flag_channels_to_parcels: # project channels to parcel_lev2 by weighted average over channels
-            #     w = 1 / conc_var_subjs[idx_subj][trial_type]
-            #     # get the normalized weighted averaging kernel
-            #     if flag_parcels_use_lev1:
-            #         Adot_parcels_weighted_xr = w * Adot_parcels_lev1_xr
-            #     else:
-            #         Adot_parcels_weighted_xr = w * Adot_parcels_lev2_xr
-            #     Adot_parcels_weighted_xr = Adot_parcels_weighted_xr / Adot_parcels_weighted_xr.sum(dim='channel')
-            #     # do the inner product over channel between conc_ts_subjs[idx_subj][trial_type] and Adot_parcels_lev2_weighted_xr
-            #     foo_hbo = Adot_parcels_weighted_xr.sel(chromo='HbO').T @ conc_ts_subjs[idx_subj][trial_type].sel(chromo='HbO')
-            #     foo_hbr = Adot_parcels_weighted_xr.sel(chromo='HbR').T @ conc_ts_subjs[idx_subj][trial_type].sel(chromo='HbR')
-            #     conc_ts_subjs[idx_subj][trial_type] = xr.concat([foo_hbo, foo_hbr], dim='chromo')
-            #     # do the same with conc_var_subjs[idx_subj][trial_type]
-            #     foo_hbo = Adot_parcels_weighted_xr.sel(chromo='HbO').T**2 @ conc_var_subjs[idx_subj][trial_type].sel(chromo='HbO')
-            #     foo_hbr = Adot_parcels_weighted_xr.sel(chromo='HbR').T**2 @ conc_var_subjs[idx_subj][trial_type].sel(chromo='HbR')
-            #     conc_var_subjs[idx_subj][trial_type] = xr.concat([foo_hbo, foo_hbr], dim='chromo')
 
 
         # get the repeatability
@@ -771,3 +864,233 @@ def boot_strap_corr(corr_subj, corr_subj_var,trial_type_list, trial_type_diff=No
         # r_ci_upper_hbr = np.tanh(z_ci_upper_hbr)
 
     return z_boot_mean, z_boot_se, r_boot_mean
+
+
+def plot_correlation_matrix( r_boot_mean, z_boot_mean, z_boot_se, t_crit, trial_type, vminmax, corr_subj=None ):
+
+    # if 0: # mean across subjects
+    #     print(f"t_crit: {t_crit:.2f}")
+        # f, axs = p.subplots(2,2,figsize=(12,12))
+
+        # ax1 = axs[0][0]
+        # foo1 = corr_hbo_subj_mean[trial_type].copy()
+        # n_channels = int(np.sqrt(len(foo1)))
+        # ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-1, vmax=1)
+        # ax1.set_title('HbO Correlation Matrix')
+
+        # ax1 = axs[0][1]
+        # foo1 = corr_hbr_subj_mean[trial_type].copy()
+        # ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-1, vmax=1)
+        # ax1.set_title('HbR Correlation Matrix')
+
+        # ax1 = axs[1][0]
+        # foo = corr_hbo_subj_mean[trial_type] / (corr_hbo_subj_std[trial_type] / np.sqrt(n_subjects))
+        # foo1 = corr_hbo_subj_mean[trial_type].copy()
+        # foo1[np.abs(foo) < t_crit] = np.nan # remove non-significant correlations
+        # ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-1, vmax=1)
+
+        # ax1 = axs[1][1]
+        # foo = corr_hbr_subj_mean[trial_type] / (corr_hbr_subj_std[trial_type] / np.sqrt(n_subjects))
+        # foo1 = corr_hbr_subj_mean[trial_type].copy()
+        # foo1[np.abs(foo) < t_crit] = np.nan # remove non-significant correlations
+        # ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-1, vmax=1)
+
+    if corr_subj is None: # weighted mean across subjects
+        f, axs = p.subplots(2,2,figsize=(12,8))
+
+        ax1 = axs[0][0]
+        # foo1 = r_boot_mean_hbo[trial_type].copy()
+        foo1 = r_boot_mean.sel(chromo='HbO', trial_type=trial_type).values
+        n_channels = int(np.sqrt(len(foo1)))
+        ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-vminmax, vmax=vminmax)
+        ax1.set_title('HbO Correlation Matrix')
+
+        ax1 = axs[0][1]
+        # foo1 = r_boot_mean_hbr[trial_type].copy()
+        foo1 = r_boot_mean.sel(chromo='HbR', trial_type=trial_type).values
+        ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-vminmax, vmax=vminmax)
+        ax1.set_title('HbR Correlation Matrix')
+
+        ax1 = axs[1][0]
+        # foo = z_boot_mean_hbo[trial_type] / z_boot_se_hbo[trial_type]
+        # foo1 = r_boot_mean_hbo[trial_type].copy()
+        foo = z_boot_mean.sel(chromo='HbO', trial_type=trial_type).values / \
+            z_boot_se.sel(chromo='HbO', trial_type=trial_type).values
+        foo1 = r_boot_mean.sel(chromo='HbO', trial_type=trial_type).copy().values
+        foo1[np.abs(foo) < t_crit] = np.nan # remove non-significant correlations
+        ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-vminmax, vmax=vminmax)
+
+        ax1 = axs[1][1]
+        # foo = z_boot_mean_hbr[trial_type] / z_boot_se_hbr[trial_type]
+        # foo1 = r_boot_mean_hbr[trial_type].copy()
+        foo = z_boot_mean.sel(chromo='HbR', trial_type=trial_type).values / \
+            z_boot_se.sel(chromo='HbR', trial_type=trial_type).values
+        foo1 = r_boot_mean.sel(chromo='HbR', trial_type=trial_type).copy().values
+        foo1[np.abs(foo) < t_crit] = np.nan # remove non-significant correlations
+        ax1.imshow( foo1.reshape((n_channels,n_channels)), cmap='jet', vmin=-vminmax, vmax=vminmax)
+
+    else: # each subject
+        n_subjects = corr_subj.subj.size
+        n_ch_or_parcel = int(np.sqrt(len(corr_subj.correlation)))
+
+        f, axs = p.subplots(n_subjects,2,figsize=(12,6*n_subjects))
+
+        for ii in range(0, n_subjects):
+            ax1 = axs[ii][0]
+            ax1.imshow( corr_subj.sel(chromo='HbO',trial_type=trial_type,subj=corr_subj.subj[ii]) \
+                .values.reshape((n_ch_or_parcel,n_ch_or_parcel)), cmap='jet', vmin=-1, vmax=1)
+            ax1.set_title(f'HbO Correlation Matrix,  Subj {corr_subj.subj[ii].values}')
+
+            ax1 = axs[ii][1]
+            ax1.imshow( corr_subj.sel(chromo='HbR',trial_type=trial_type,subj=corr_subj.subj[ii]) \
+                .values.reshape((n_ch_or_parcel,n_ch_or_parcel)), cmap='jet', vmin=-1, vmax=1)
+            ax1.set_title(f'HbR Correlation Matrix,  Subj {corr_subj.subj[ii].values}')
+
+
+
+def plot_connectivity_circle( r_boot_mean, z_boot_mean, z_boot_se, t_crit, trial_type, vminmax, flag_show_hbo, flag_parcels_use_lev1, unique_parcels_lev1, unique_parcels_lev2, n_lines=100, colormap='jet', flag_show_specific_parcels=False, parcels_to_show=None, flag_show_tstat=False ):
+
+    from mne_connectivity.viz import plot_connectivity_circle
+    from mne.viz import circular_layout
+
+    # FIXME: can I get y pos of parcels and order by that?
+    # FIXME: would be nice to color code the 17 networks and visualize them on the brain. Maybe consider colors in examples at https://mne.tools/mne-connectivity/dev/generated/mne_connectivity.viz.plot_connectivity_circle.html
+
+    n_channels = int(np.sqrt(r_boot_mean.shape[2]))
+
+    # First, we reorder the labels based on their location in the left hemi
+    #label_names = [label.name for label in labels]
+    if flag_parcels_use_lev1:
+        lh_labels = [name for name in unique_parcels_lev1 if name.endswith("LH")]
+        rh_labels = [name for name in unique_parcels_lev1 if name.endswith("RH")] #[label[:-2] + "rh" for label in lh_labels]
+        unique_parcels_list = unique_parcels_lev1.tolist()
+    else:
+        lh_labels = [name for name in unique_parcels_lev2 if name.endswith("LH")]
+        rh_labels = [name for name in unique_parcels_lev2 if name.endswith("RH")] #[label[:-2] + "rh" for label in lh_labels]
+        unique_parcels_list = unique_parcels_lev2.tolist()
+
+    # Get the y-location of the label
+    # label_ypos = list()
+    # for name in lh_labels:
+    #     idx = label_names.index(name)
+    #     ypos = np.mean(labels[idx].pos[:, 1])
+    #     label_ypos.append(ypos)
+
+    # Reorder the labels based on their location
+    #lh_labels = [label for (yp, label) in sorted(zip(label_ypos, lh_labels))]
+
+
+    # Save the plot order and create a circular layout
+    node_order = list()
+    node_order.extend(lh_labels)  # reverse the order
+    node_order.extend(rh_labels[::-1])
+
+    # node_angles = circular_layout(
+    #     label_names, node_order, start_pos=90, group_boundaries=[0, len(label_names) / 2]
+    # )
+
+
+
+
+    if flag_show_hbo:
+        # foo = z_boot_mean_hbo[trial_type] / z_boot_se_hbo[trial_type]
+        # foo1 = r_boot_mean_hbo[trial_type].copy()
+        foo = z_boot_mean.sel(chromo='HbO', trial_type=trial_type).values / \
+            z_boot_se.sel(chromo='HbO', trial_type=trial_type).values
+        foo1 = r_boot_mean.sel(chromo='HbO', trial_type=trial_type).values
+    else:
+        # foo = z_boot_mean_hbr[trial_type] / z_boot_se_hbr[trial_type]
+        # foo1 = r_boot_mean_hbr[trial_type].copy()
+        foo = z_boot_mean.sel(chromo='HbR', trial_type=trial_type).values / \
+            z_boot_se.sel(chromo='HbR', trial_type=trial_type).values
+        foo1 = r_boot_mean.sel(chromo='HbR', trial_type=trial_type).values
+
+
+    foo1[np.abs(foo) < t_crit] = 0 #np.nan # remove non-significant correlations
+    foo1 = foo1.reshape((n_channels,n_channels))
+    foo = foo.reshape((n_channels,n_channels))
+
+
+
+    node_angles = circular_layout(
+        unique_parcels_list, node_order, start_pos=90, group_boundaries=[0, len(unique_parcels_list) / 2]
+    )
+
+    # colormap for 17networks
+
+
+    # make label_colors from the FreeSurfer parcellation
+    label_colors = np.zeros((len(unique_parcels_list), 4))
+    label_colors[:, 0] = 1.0
+    label_colors[:, 1] = 0.0
+    label_colors[:, 2] = 0.0
+    label_colors[:, 3] = 1.0
+    for ii in range(0, len(unique_parcels_list)):
+        if unique_parcels_list[ii].endswith('LH'):
+            label_colors[ii, 0] = 0.0
+            label_colors[ii, 1] = 1.0
+            label_colors[ii, 2] = 0.0
+        elif unique_parcels_list[ii].endswith('RH'):
+            label_colors[ii, 0] = 0.0
+            label_colors[ii, 1] = 0.0
+            label_colors[ii, 2] = 1.0
+
+
+    if flag_show_specific_parcels:
+        for ii in range(0, len(parcels_to_show)):
+            idx1 = [i for i, x in enumerate(unique_parcels_list) if x == parcels_to_show[ii]]
+            idx2 = np.where(np.abs(foo1[:,idx1])>0)[0]
+            idx2 = idx2[ np.where(idx2 != idx1[0])[0] ]# remove the diagonal
+            if ii == 0:
+                if flag_show_tstat:
+                    foo2 = foo[idx2,idx1]
+                else:
+                    foo2 = foo1[idx2,idx1]
+                indices1 = idx1 * np.ones((len(idx2))).astype(int)
+                indices2 = idx2
+            else:
+                if flag_show_tstat:
+                    foo2 = np.concatenate((foo2, foo[idx2,idx1]), axis=0)
+                else:
+                    foo2 = np.concatenate((foo2, foo1[idx2,idx1]), axis=0)
+                indices1 = np.concatenate((indices1, idx1 * np.ones((len(idx2))).astype(int) ), axis=0)
+                indices2 = np.concatenate((indices2, idx2), axis=0)
+        indices = np.array([indices1, indices2])
+    else:
+        if flag_show_tstat:
+            foo2 = foo
+        else:
+            foo2 = foo1
+
+
+    # Plot the graph using node colors from the FreeSurfer parcellation. We only
+    # show the 300 strongest connections.
+    fig, ax = p.subplots(figsize=(8, 8), facecolor="black", subplot_kw=dict(polar=True))
+    if flag_show_specific_parcels:
+        plot_connectivity_circle(
+            foo2,
+            unique_parcels_list,
+            indices=indices,
+            n_lines=n_lines,
+            node_angles=node_angles,
+            node_colors=label_colors,
+        #    title="All-to-All Connectivity left-Auditory " "Condition (PLI)",
+            ax=ax,
+            colormap=colormap,
+            vmin=vminmax[0],
+            vmax=vminmax[1],
+        )
+    else:
+        plot_connectivity_circle(
+            foo2,
+            unique_parcels_list,
+            n_lines=n_lines,
+            node_angles=node_angles,
+            node_colors=label_colors,
+        #    title="All-to-All Connectivity left-Auditory " "Condition (PLI)",
+            ax=ax,
+            colormap=colormap,
+            vmin=vminmax[0],
+            vmax=vminmax[1],
+        )
+    fig.tight_layout()
