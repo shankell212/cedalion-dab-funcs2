@@ -71,7 +71,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
             chs_pruned,
             ax[0][1],
             min_dist = cfg_preprocess['cfg_prune']['sd_threshs'][0],
-            max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
+            #max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
             cmap=cmap, #'gist_rainbow',
             norm=norm,
             vmin=0,
@@ -98,7 +98,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
             variance_vals_da.isel(wavelength=0),  # first wav
             ax1,
             min_dist = cfg_preprocess['cfg_prune']['sd_threshs'][0],
-            max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
+            #max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
             cmap='jet',
             vmin=min_variance,
             vmax=max_variance,
@@ -122,7 +122,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
             variance_vals_da.isel(wavelength=1),  # 2nd wav
             ax1,
             min_dist = cfg_preprocess['cfg_prune']['sd_threshs'][0],
-            max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
+            #max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
             cmap='jet',
             vmin=min_variance,
             vmax=max_variance,
@@ -148,7 +148,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
             snr.isel(wavelength=0),
             ax1,
             min_dist = cfg_preprocess['cfg_prune']['sd_threshs'][0],
-            max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
+            #max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
             cmap='jet',
             vmin = 0,  #np.min(snr.isel(wavelength=0)),
             vmax = 25,  #np.max(snr.isel(wavelength=0)),
@@ -174,7 +174,7 @@ def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None
             snr.isel(wavelength=1),
             ax1,
             min_dist = cfg_preprocess['cfg_prune']['sd_threshs'][0],
-            max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
+            #max_dist = cfg_preprocess['cfg_prune']['sd_threshs'][1], 
             cmap='jet',
             vmin = 0,  #np.min(snr.isel(wavelength=1)),
             vmax = 25,  #np.max(snr.isel(wavelength=1)),
@@ -560,7 +560,7 @@ def plotDQR_sidecar(file_json, rec, cfg_dataset, filenm):
         coords={"channel": rec["amp"].channel},
     )
     plots.scalp_plot(
-            rec["conc_tddr"],
+            rec["conc"],
             rec.geo3d,
             power_level,
             ax[1,0],
@@ -583,7 +583,7 @@ def plotDQR_sidecar(file_json, rec, cfg_dataset, filenm):
         coords={"channel": rec["amp"].channel},
     )
     plots.scalp_plot(
-            rec["conc_tddr"],
+            rec["conc"],
             rec.geo3d,
             power_level,
             ax[1,1],
