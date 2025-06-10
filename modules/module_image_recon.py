@@ -283,25 +283,27 @@ def _get_image_brain_scalp_indirect(y, W, A, SB=False, G=None):
          X_wl1 = sbf.go_from_kernel_space_to_image_space_indirect(X_wl1, G)
          
          
-     X_od = np.vstack([X_wl0, X_wl1]).T
      
-     if len(X_od.shape) == 2:
+     if len(X_wl0.shape) == 1:
+         X_od = np.vstack([X_wl0, X_wl1]).T
          X_od = xr.DataArray(X_od, 
                           dims = ('vertex', 'wavelength'),
                           coords = {'wavelength': W.wavelength}
                           )
      else:
-         if 'time' in y.dims:
-             t = y.time
-             t_name = 'time'
-         elif 'reltime' in y.dims:
-             t = y.reltime
-             t_name = 'reltime'
-         X_od = xr.DataArray(X_od, 
-                          dims = ('vertex', 'wavelength', t_name),
-                          coords = {'wavelength': W.wavelength,
-                                    t_name: t},
-                          )
+        X_od = np.stack([X_wl0, X_wl1], axis=2)
+        X_od = X_od.transpose(0,2,1)  # make it (vertex, wavelength, time)
+        if 'time' in y.dims:
+            t = y.time
+            t_name = 'time'
+        elif 'reltime' in y.dims:
+            t = y.reltime
+            t_name = 'reltime'
+        X_od = xr.DataArray(X_od, 
+                        dims = ('vertex', 'wavelength', t_name),
+                        coords = {'wavelength': W.wavelength,
+                                t_name: t},
+                        )
 
      if 'parcel' in A.coords:
         X_od = X_od.assign_coords({"parcel" : ("vertex", A.coords['parcel'].values)})
@@ -397,8 +399,15 @@ def get_image_noise(C_meas, X, W, SB=False, DIRECT=True, G=None):
 
         cov_img_diag = einv.values**2 @ cov_img_diag
 
-        
-    noise = X.copy()
+    if not hasattr(X, 'time') and not hasattr(X, 'reltime'):    
+        noise = X.copy()
+    else:
+        if hasattr(X, 'time'):
+            noise = X.isel(time=0, drop=True)
+        elif hasattr(X, 'reltime'):
+            noise = X.isel(reltime=0, drop=True)
+        else:
+            raise ValueError("X must have either 'time' or 'reltime' dimension")
     noise.values = cov_img_diag
 
     return noise

@@ -155,7 +155,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                 recTmp["od_corrected"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset)
                 
             # Get the slope of 'od' before motion correction and any bandpass filtering
-            slope_base = quant_slope(recTmp, "od", True)
+            slope_base = quant_slope(recTmp, "od")
 
             # Spline SG # !!! fix me in future
             # if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
@@ -169,11 +169,11 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess ):
                     recTmp['od_corrected'] = motion_correct.tddr( recTmp['od_corrected'] )  
                 else:   # do tddr on uncorrected od
                     recTmp['od_corrected'] = motion_correct.tddr( recTmp['od'] )  
-                slope_corrected = quant_slope(recTmp, "od_corrected", False)  # Get slopes after correction before bandpass filtering
+                slope_corrected = quant_slope(recTmp, "od_corrected")  # Get slopes after correction before bandpass filtering
             else:
                 if 'od_corrected' not in recTmp.timeseries.keys():
                     recTmp['od_corrected'] = recTmp['od']
-                    slope_corrected = quant_slope(recTmp, "od_corrected", True)  # Get slopes after correction before bandpass filtering
+                    slope_corrected = quant_slope(recTmp, "od_corrected")  # Get slopes after correction before bandpass filtering
             
             
             recTmp['od_corrected'] = recTmp['od_corrected'].where( ~recTmp['od_corrected'].isnull(), 0)  #1e-18 )  # replace any NaNs after TDDR
@@ -539,14 +539,10 @@ def Conc( rec = None ):
     return rec
 
 
-def quant_slope(rec, timeseries, dequantify):
-    if dequantify:
-        foo = rec[timeseries].copy()
-        foo = foo.pint.dequantify()
-        slope = foo.polyfit(dim='time', deg=1).sel(degree=1)
-    else:
-        slope = rec[timeseries].polyfit(dim='time', deg=1).sel(degree=1)
-        
+def quant_slope(rec, timeseries):
+    foo = rec[timeseries].copy()
+    foo = foo.pint.dequantify()
+    slope = foo.polyfit(dim='time', deg=1).sel(degree=1)
     slope = slope.rename({"polyfit_coefficients": "slope"})
     slope = slope.assign_coords(channel = rec[timeseries].channel)
     slope = slope.assign_coords(wavelength = rec[timeseries].wavelength)
