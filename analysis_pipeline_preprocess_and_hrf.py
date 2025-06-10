@@ -322,6 +322,7 @@ if not flag_load_blockaveraged_data:
     else:    # if not pruning, save weighted blockaverage data
         _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
     
+    
     groupavg_results = {'blockaverage': blockaverage_mean, # group_blockaverage  rename
                'blockaverage_stderr': blockaverage_stderr,
                'blockaverage_subj': blockaverage_subj,  # always unweighted   - load into img recon
