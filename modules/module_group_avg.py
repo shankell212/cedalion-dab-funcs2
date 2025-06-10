@@ -120,43 +120,44 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             mse_t = (foo_t**2).sum('epoch') / (n_epochs - 1)**2 # this is squared to get variance of the mean, aka MSE of the mean
     
             # set bad values in mse_t to the bad value threshold
-            amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
+            amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths # !!! always grabbing last file
             idx_amp = np.where(amp < cfg_mse['mse_amp_thresh'])[0]
-            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
+            idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.92)[0]  # sat chans = 0.92 in chs_pruned
             idx_bad = np.where(mse_t == 0)[0]
             idx_bad1 = idx_bad[idx_bad<n_chs]
             idx_bad2 = idx_bad[idx_bad>=n_chs] - n_chs
             
-            mse_t[:,idx_amp,:] = cfg_mse['mse_val_for_bad_data']
-            mse_t[:,idx_amp+n_chs,:] = cfg_mse['mse_val_for_bad_data']
-            mse_t[:,idx_sat,:] = cfg_mse['mse_val_for_bad_data']
-            mse_t[:,idx_sat+n_chs,:] = cfg_mse['mse_val_for_bad_data']
-            mse_t[:,idx_bad,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[idx_amp,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[idx_amp+n_chs,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[idx_sat,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[idx_sat+n_chs,:] = cfg_mse['mse_val_for_bad_data']
+            mse_t[idx_bad] = cfg_mse['mse_val_for_bad_data']
+            
             
             channels = blockaverage_weighted.channel
-            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_amp),:,:] = cfg_mse['blockaverage_val']
-            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_sat),:,:] = cfg_mse['blockaverage_val']
-            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_bad1),:,:] = cfg_mse['blockaverage_val']
-            blockaverage_weighted.loc[trial_type, channels.isel(channel=idx_bad2),:,:] = cfg_mse['blockaverage_val']
-
-            blockaverage.loc[trial_type, channels.isel(channel=idx_amp),:,:] = cfg_mse['blockaverage_val']
-            blockaverage.loc[trial_type, channels.isel(channel=idx_sat),:,:] = cfg_mse['blockaverage_val']
-            blockaverage.loc[trial_type, channels.isel(channel=idx_bad1),:,:] = cfg_mse['blockaverage_val']
-            blockaverage.loc[trial_type, channels.isel(channel=idx_bad2),:,:] = cfg_mse['blockaverage_val']
-
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_amp).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_sat).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_bad1).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage_weighted.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_bad2).channel.data)] = cfg_mse['blockaverage_val']
             
+            blockaverage.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_amp).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_sat).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_bad1).channel.data)] = cfg_mse['blockaverage_val']
+            blockaverage.loc[dict(trial_type=trial_type, channel=channels.isel(channel=idx_bad2).channel.data)] = cfg_mse['blockaverage_val']
+    
             # set the minimum value of mse_t
-            mse_t = xr.where(mse_t < mse_min_thresh, mse_min_thresh, mse_t)
+            mse_t = xr.where(mse_t < cfg_mse['mse_min_thresh'], cfg_mse['mse_min_thresh'], mse_t)
+
 
             if 'chromo' in ts.dims:
                 mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')  
             else:
-                mse_t = mse_t.unstack('measurement').transpose('wavelength','channel','reltime')
                 if 'reltime' in mse_t.dims:
                     mse_t = mse_t.unstack('measurement').transpose('wavelength','channel','reltime')
                 else:
                     mse_t = mse_t.unstack('measurement').transpose('wavelength','channel')
                 
+            
             mse_t = mse_t.expand_dims('trial_type')
             source_coord = blockaverage_weighted['source']
             mse_t = mse_t.assign_coords(source=('channel',source_coord.data))
@@ -237,9 +238,8 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
     for idxt, trial_type in enumerate(blockaverage_mean_weighted.trial_type.values):         
         plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blockaverage_mean_weighted, 
                          total_stderr_blockaverage, mse_mean_within_subject, mse_weighted_between_subjects)
-        plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, mse_val_for_bad_data, mse_min_thresh)  # !!! not sure if these r working correctly tbh
+        plot_mse_hist(rec, rec_str, trial_type, cfg_dataset, blockaverage_mse_subj, cfg_mse['mse_val_for_bad_data'], cfg_mse['mse_min_thresh'])  # !!! not sure if these r working correctly tbh
     
-
     return blockaverage_mean, blockaverage_mean_weighted, total_stderr_blockaverage, blockaverage_subj, blockaverage_mse_subj
 
 
@@ -279,8 +279,6 @@ def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blocka
                 rec[0][0].geo3d,
                 foo_da_tmp,
                 ax1,
-                min_dist = cfg_blockavg['cfg_prune']['sd_threshs'][0],
-                max_dist = cfg_blockavg['cfg_prune']['sd_threshs'][1], 
                 cmap='jet',
                 vmin=-max_val,
                 vmax=max_val,
@@ -308,8 +306,6 @@ def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blocka
                 rec[0][0].geo3d,
                 foo_da_tmp,
                 ax1,
-                min_dist = cfg_blockavg['cfg_prune']['sd_threshs'][0],
-                max_dist = cfg_blockavg['cfg_prune']['sd_threshs'][1], 
                 cmap='jet',
                 vmin=-max_val,
                 vmax=max_val,
@@ -339,8 +335,6 @@ def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blocka
                 rec[0][0].geo3d,
                 foo_da_tmp,
                 ax1,
-                min_dist = cfg_blockavg['cfg_prune']['sd_threshs'][0],
-                max_dist = cfg_blockavg['cfg_prune']['sd_threshs'][1], 
                 cmap='jet',
                 vmin=min_val,
                 vmax=max_val,
@@ -370,8 +364,6 @@ def plot_mean_stderr(rec, rec_str, trial_type, cfg_dataset, cfg_blockavg, blocka
                 rec[0][0].geo3d,
                 foo_da_tmp,
                 ax1,
-                min_dist = cfg_blockavg['cfg_prune']['sd_threshs'][0],
-                max_dist = cfg_blockavg['cfg_prune']['sd_threshs'][1], 
                 cmap='jet',
                 vmin=min_val,
                 vmax=max_val,

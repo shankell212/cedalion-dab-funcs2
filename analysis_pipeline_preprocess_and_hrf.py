@@ -17,12 +17,12 @@ import json
 
 # import functions from a different directory
 import sys
-sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
+#sys.path.append('/projectnb/nphfnirs/ns/Shannon/Code/cedalion-dab-funcs2/modules')
+sys.path.append('C:\\Users\\shank\\Documents\\GitHub\\cedalion-dab-funcs2\\modules')
 import module_load_and_preprocess as pfDAB
 import module_plot_DQR as pfDAB_dqr
 import module_group_avg as pfDAB_grp_avg    
 import module_ERBM_ICA as pfDAB_ERBM
-import module_image_recon as img_recon 
 
 # Turn off all warnings
 import warnings
@@ -51,22 +51,23 @@ importlib.reload(pfDAB_grp_avg)
 
 
 cfg_hrf = {
-    'stim_lst' : ['right', 'left'],       #['ST', 'DT'], 
-    't_pre' : 2*units.s,  # 5 *units.s, 
-    't_post' : 13*units.s,   # 33 *units.s
+    'stim_lst' : ["STS"], # ['right', 'left'],       #['ST', 'DT'], 
+    't_pre' : 5 *units.s,  #2*units.s,  # 5 *units.s, 
+    't_post' : 33 *units.s #13*units.s,   # 33 *units.s
     #'t_post' : [ 33, 33 ] *units.s   # !!! GLM does not let you have different time ranges for diff stims right now
     }
 
 cfg_dataset = {
     #'root_dir' : "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/",
-    'root_dir' : "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/", 
-    #'subj_ids' : ['01','02','03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'],
-    'subj_ids' : ['538', '547', '549', '568', '577', '580', '581', '583', '586', '587', '588', '592', '613', '618', '619', '621', '633'],   # BS
+    #'root_dir' : "/projectnb/nphfnirs/s/datasets/BSMW_Laura_Miray_2025/BS/", 
+    'root_dir' : "D:\\fNIRS\\DATA\\Interactive_Walking_HD\\",
+    'subj_ids' : ['01','02'], #,'03','04','05','06','07','08','09','10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20'],
+    #'subj_ids' : ['538', '547', '549', '568', '577', '580', '581', '583', '586', '587', '588', '592', '613', '618', '619', '621', '633'],   # BS
     #'subj_ids' : ['633'],
-    'file_ids' : ['BS_run-01', 'BS_run-02', 'BS_run-03'],
-    'subj_id_exclude' : ['538', '547', '549', '568', '581', '577', '580', '583'],   # 577, 580 and 583 all have 1220 chans???   #[10, 14, 16, 17, 18],  # old numbering: ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
+    'file_ids' : ['STS_run-01'], #['BS_run-01', 'BS_run-02', 'BS_run-03'],
+    'subj_id_exclude' : [], #['538', '547', '549', '568', '581', '577', '580', '583'],   # 577, 580 and 583 all have 1220 chans???   #[10, 14, 16, 17, 18],  # old numbering: ['10', '15', '16', '17'], #['05','07'] # if you want to exclude a subject from the group average
     'cfg_hrf' : cfg_hrf,
-    'derivatives_subfolder' : 'Shannon'    # if '' (empty string), will save in normal derivatives folder, otherwise will put all saved stuff in your subfolder under derivs
+    'derivatives_subfolder' : '' #'Shannon'    # if '' (empty string), will save in normal derivatives folder, otherwise will put all saved stuff in your subfolder under derivs
 }
 
 cfg_dataset['filenm_lst'] = [               # Add 'filenm_lst' separately after cfg_dataset is initialized
@@ -152,7 +153,7 @@ cfg_blockavg = {
     'rec_str' :  'od_corrected',  # 'od_corrected',   # what you want to block average (will be either 'od_corrected' or 'conc')
     'flag_prune_channels' : cfg_preprocess['flag_prune_channels'],
     'cfg_hrf' : cfg_hrf,
-    'trange_hrf_stat' :  [4, 7],  # [10, 20],   # [4,7] for BS
+    'trange_hrf_stat' : [10,20], #[4, 7],  # [10, 20],   # [4,7] for BS
     'flag_save_block_avg_hrf': True,
     'flag_save_each_subj' : False,  # !!! do we need this?  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
@@ -165,7 +166,7 @@ cfg_erbmICA = {}
 
 save_path = os.path.join(cfg_dataset['root_dir'], 'derivatives', cfg_dataset["derivatives_subfolder"],'processed_data')  
 
-flag_load_preprocessed_data = False  
+flag_load_preprocessed_data = True  
 
 flag_load_blockaveraged_data = False
 
@@ -320,6 +321,7 @@ if not flag_load_blockaveraged_data:
     
     else:    # if not pruning, save weighted blockaverage data
         _, blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, cfg_blockavg['rec_str'], chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    
     
     groupavg_results = {'blockaverage': blockaverage_mean, # group_blockaverage  rename
                'blockaverage_stderr': blockaverage_stderr,
